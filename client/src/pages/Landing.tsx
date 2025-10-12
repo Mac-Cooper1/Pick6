@@ -33,14 +33,31 @@ export function Landing() {
 
     try {
       if (authMode === 'signup') {
+        // Register new user
         await register(name, email);
+        navigate('/league-setup');
       } else {
-        await login(email);
+        // Try to login existing user
+        try {
+          await login(email);
+          navigate('/league-setup');
+        } catch (err: any) {
+          // If user not found, show helpful error
+          if (err.response?.status === 404) {
+            setError('No account found with this email. Please sign up first.');
+          } else {
+            setError(err.response?.data?.message || 'Login failed');
+          }
+          setIsLoading(false);
+        }
       }
-      navigate('/league-setup');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'An error occurred');
-    } finally {
+      // Handle registration errors
+      if (err.response?.status === 409) {
+        setError('An account with this email already exists. Please sign in instead.');
+      } else {
+        setError(err.response?.data?.message || 'An error occurred');
+      }
       setIsLoading(false);
     }
   };

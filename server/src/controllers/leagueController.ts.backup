@@ -95,6 +95,9 @@ export async function createLeague(req: AuthRequest, res: Response, next: any) {
     next(error);
   }
 }
+    next(error);
+  }
+}
 
 /**
  * Join an existing league
@@ -168,12 +171,15 @@ export async function joinLeague(req: AuthRequest, res: Response, next: any) {
     next(error);
   }
 }
+    throw error;
+  }
+}
 
 /**
  * Get league details
  * GET /api/leagues/:leagueId
  */
-export async function getLeague(req: AuthRequest, res: Response, next: any) {
+export async function getLeague(req: AuthRequest, res: Response) {
   try {
     const userId = req.userId!;
     const leagueId = parseInt(req.params.leagueId);
@@ -215,12 +221,15 @@ export async function getLeague(req: AuthRequest, res: Response, next: any) {
     next(error);
   }
 }
+    throw error;
+  }
+}
 
 /**
  * Get all league members with their teams
  * GET /api/leagues/:leagueId/members
  */
-export async function getLeagueMembers(req: AuthRequest, res: Response, next: any) {
+export async function getLeagueMembers(req: AuthRequest, res: Response) {
   try {
     const userId = req.userId!;
     const leagueId = parseInt(req.params.leagueId);
@@ -281,5 +290,8 @@ export async function getLeagueMembers(req: AuthRequest, res: Response, next: an
     res.json(response);
   } catch (error) {
     next(error);
+  }
+}
+    throw error;
   }
 }

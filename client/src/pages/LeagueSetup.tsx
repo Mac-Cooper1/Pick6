@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { leagueApi } from '../services/api';
+import { leagueApi, authApi } from '../services/api';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { ErrorMessage } from '../components/ErrorMessage';
+import { League } from '../types';
 
-type FlowMode = 'select' | 'create' | 'join';
+type FlowMode = 'select' | 'create' | 'join' | 'myLeagues';
 
 export function LeagueSetup() {
   const navigate = useNavigate();
@@ -15,6 +16,7 @@ export function LeagueSetup() {
   const [flowMode, setFlowMode] = useState<FlowMode>('select');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [myLeagues, setMyLeagues] = useState<any[]>([]);
 
   // Create league state
   const [leagueName, setLeagueName] = useState('');
@@ -25,6 +27,23 @@ export function LeagueSetup() {
   // Join league state
   const [joinCode, setJoinCode] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
+
+  // Fetch user's leagues on mount
+  useEffect(() => {
+    const fetchUserLeagues = async () => {
+      try {
+        const currentUser = await authApi.getCurrentUser();
+        if (currentUser.leagues && currentUser.leagues.length > 0) {
+          setMyLeagues(currentUser.leagues);
+          setFlowMode('myLeagues');
+        }
+      } catch (err) {
+        console.error('Failed to fetch leagues:', err);
+      }
+    };
+
+    fetchUserLeagues();
+  }, []);
 
   const handleCreateLeague = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -89,6 +108,34 @@ export function LeagueSetup() {
         {error && (
           <div className="mb-4">
             <ErrorMessage message={error} />
+          </div>
+        )}
+
+        {flowMode === 'myLeagues' && (
+          <div className="space-y-4">
+            <h3 className="text-xl font-semibold mb-4">My Leagues</h3>
+
+            <div className="space-y-2 mb-4">
+              {myLeagues.map((league) => (
+                <button
+                  key={league.id}
+                  onClick={() => navigate(`/app/${league.id}`)}
+                  className="w-full p-4 text-left bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg transition-colors"
+                >
+                  <div className="font-semibold text-green-900">{league.name}</div>
+                  <div className="text-sm text-gray-600">Code: {league.joinCode}</div>
+                </button>
+              ))}
+            </div>
+
+            <div className="border-t pt-4 space-y-2">
+              <Button fullWidth onClick={() => setFlowMode('create')}>
+                Create New League
+              </Button>
+              <Button fullWidth variant="secondary" onClick={() => setFlowMode('join')}>
+                Join Another League
+              </Button>
+            </div>
           </div>
         )}
 

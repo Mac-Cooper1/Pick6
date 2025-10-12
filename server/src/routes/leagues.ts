@@ -6,12 +6,13 @@ import {
   getLeagueMembers,
 } from '../controllers/leagueController';
 import { authenticate } from '../middleware/auth';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
 
-router.post('/create', authenticate, createLeague);
-router.post('/join', authenticate, joinLeague);
-router.get('/:leagueId', authenticate, getLeague);
-router.get('/:leagueId/members', authenticate, getLeagueMembers);
+router.post('/create', authenticate, asyncHandler(createLeague));
+router.post('/join', authenticate, asyncHandler(joinLeague));
+router.get('/:leagueId', authenticate, asyncHandler(getLeague));
+router.get('/:leagueId/members', authenticate, asyncHandler(getLeagueMembers));
 
 export default router;

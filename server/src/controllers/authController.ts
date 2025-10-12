@@ -11,7 +11,7 @@ const prisma = new PrismaClient();
  * POST /api/auth/register
  * Body: { name: string, email: string }
  */
-export async function register(req: Request, res: Response) {
+export async function register(req: Request, res: Response, next: any) {
   try {
     const { name, email } = req.body;
 
@@ -53,7 +53,7 @@ export async function register(req: Request, res: Response) {
       token,
     });
   } catch (error) {
-    throw error;
+    next(error);
   }
 }
 
@@ -62,7 +62,7 @@ export async function register(req: Request, res: Response) {
  * POST /api/auth/login
  * Body: { email: string }
  */
-export async function login(req: Request, res: Response) {
+export async function login(req: Request, res: Response, next: any) {
   try {
     const { email } = req.body;
 
@@ -89,7 +89,7 @@ export async function login(req: Request, res: Response) {
       token,
     });
   } catch (error) {
-    throw error;
+    next(error);
   }
 }
 
@@ -98,7 +98,7 @@ export async function login(req: Request, res: Response) {
  * GET /api/auth/me
  * Protected route
  */
-export async function getCurrentUser(req: AuthRequest, res: Response) {
+export async function getCurrentUser(req: AuthRequest, res: Response, next: any) {
   try {
     const userId = req.userId!;
 
@@ -128,6 +128,6 @@ export async function getCurrentUser(req: AuthRequest, res: Response) {
       })),
     });
   } catch (error) {
-    throw error;
+    next(error);
   }
 }

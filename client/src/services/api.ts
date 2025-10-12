@@ -15,11 +15,15 @@ import type {
   ErrorResponse,
 } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// In development, use relative URL so Vite proxy works
+// In production, use the full API_URL from environment
+const API_URL = import.meta.env.PROD
+  ? (import.meta.env.VITE_API_URL || 'http://localhost:3001')
+  : '';
 
 // Create axios instance
 const api = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: API_URL ? `${API_URL}/api` : '/api',
   headers: {
     'Content-Type': 'application/json',
   },
