@@ -1,0 +1,285 @@
+import { Response } from 'express';
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcrypt';
+import { AuthRequest, CreateLeagueRequest, JoinLeagueRequest } from '../types';
+import { AppError } from '../middleware/errorHandler';
+import { generateJoinCode, validateJoinCode } from '../utils/joinCode';
+
+const prisma = new PrismaClient();
+
+/**
+ * Create a new league
+ * POST /api/leagues/create
+ * Body: { name, maxPlayers, password, customJoinCode? }
+ */
+export async function createLeague(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const { name, maxPlayers, password, customJoinCode }: CreateLeagueRequest = req.body;
+
+    // Validation
+    if (!name || !password || !maxPlayers) {
+      throw new AppError('Name, password, and maxPlayers are required', 400);
+    }
+
+    if (name.length < 1 || name.length > 50) {
+      throw new AppError('League name must be between 1 and 50 characters', 400);
+    }
+
+    if (maxPlayers < 8 || maxPlayers > 12) {
+      throw new AppError('Max players must be between 8 and 12', 400);
+    }
+
+    // Generate or validate join code
+    let joinCode: string;
+    if (customJoinCode) {
+      joinCode = customJoinCode.toUpperCase();
+      if (!validateJoinCode(joinCode)) {
+        throw new AppError('Join code must be 6 alphanumeric characters', 400);
+      }
+
+      // Check if code already exists
+      const existing = await prisma.league.findUnique({
+        where: { joinCode },
+      });
+
+      if (existing) {
+        throw new AppError('Join code already in use', 409);
+      }
+    } else {
+      // Generate unique join code
+      let attempts = 0;
+      do {
+        joinCode = generateJoinCode();
+        const existing = await prisma.league.findUnique({
+          where: { joinCode },
+        });
+        if (!existing) break;
+        attempts++;
+      } while (attempts < 10);
+
+      if (attempts >= 10) {
+        throw new AppError('Could not generate unique join code', 500);
+      }
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create league
+    const league = await prisma.league.create({
+      data: {
+        name,
+        joinCode,
+        password: hashedPassword,
+        maxPlayers,
+      },
+    });
+
+    // Add creator as first member
+    await prisma.leagueMember.create({
+      data: {
+        leagueId: league.id,
+        userId,
+      },
+    });
+
+    res.status(201).json({
+      id: league.id,
+      name: league.name,
+      joinCode: league.joinCode,
+      maxPlayers: league.maxPlayers,
+      draftComplete: league.draftComplete,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Join an existing league
+ * POST /api/leagues/join
+ * Body: { joinCode, password }
+ */
+export async function joinLeague(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const { joinCode, password }: JoinLeagueRequest = req.body;
+
+    if (!joinCode || !password) {
+      throw new AppError('Join code and password are required', 400);
+    }
+
+    const normalizedCode = joinCode.toUpperCase();
+
+    // Find league
+    const league = await prisma.league.findUnique({
+      where: { joinCode: normalizedCode },
+      include: {
+        members: true,
+      },
+    });
+
+    if (!league) {
+      throw new AppError('League not found', 404);
+    }
+
+    // Check password
+    const passwordMatch = await bcrypt.compare(password, league.password);
+    if (!passwordMatch) {
+      throw new AppError('Incorrect password', 401);
+    }
+
+    // Check if league is full
+    if (league.members.length >= league.maxPlayers) {
+      throw new AppError('League is full', 400);
+    }
+
+    // Check if user is already a member
+    const existingMember = league.members.find((m) => m.userId === userId);
+    if (existingMember) {
+      // Return league info if already a member
+      return res.json({
+        id: league.id,
+        name: league.name,
+        joinCode: league.joinCode,
+        maxPlayers: league.maxPlayers,
+        draftComplete: league.draftComplete,
+        message: 'Already a member of this league',
+      });
+    }
+
+    // Add user as member
+    await prisma.leagueMember.create({
+      data: {
+        leagueId: league.id,
+        userId,
+      },
+    });
+
+    res.json({
+      id: league.id,
+      name: league.name,
+      joinCode: league.joinCode,
+      maxPlayers: league.maxPlayers,
+      draftComplete: league.draftComplete,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Get league details
+ * GET /api/leagues/:leagueId
+ */
+export async function getLeague(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    const league = await prisma.league.findUnique({
+      where: { id: leagueId },
+      include: {
+        members: {
+          include: {
+            user: true,
+          },
+        },
+      },
+    });
+
+    if (!league) {
+      throw new AppError('League not found', 404);
+    }
+
+    // Check if user is a member
+    const isMember = league.members.some((m) => m.userId === userId);
+    if (!isMember) {
+      throw new AppError('Not a member of this league', 403);
+    }
+
+    res.json({
+      id: league.id,
+      name: league.name,
+      joinCode: league.joinCode,
+      maxPlayers: league.maxPlayers,
+      draftComplete: league.draftComplete,
+      memberCount: league.members.length,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Get all league members with their teams
+ * GET /api/leagues/:leagueId/members
+ */
+export async function getLeagueMembers(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    // Verify user is a member
+    const member = await prisma.leagueMember.findUnique({
+      where: {
+        leagueId_userId: {
+          leagueId,
+          userId,
+        },
+      },
+    });
+
+    if (!member) {
+      throw new AppError('Not a member of this league', 403);
+    }
+
+    // Get all members with their drafted teams
+    const members = await prisma.leagueMember.findMany({
+      where: { leagueId },
+      include: {
+        user: true,
+        user: {
+          include: {
+            draftPicks: {
+              where: { leagueId },
+              include: {
+                team: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        joinedAt: 'asc',
+      },
+    });
+
+    const response = members.map((m) => ({
+      id: m.user.id,
+      name: m.user.name,
+      email: m.user.email,
+      joinedAt: m.joinedAt,
+      teams: m.user.draftPicks.map((pick) => ({
+        id: pick.team.id,
+        name: pick.team.name,
+        conference: pick.team.conference,
+        pickNumber: pick.pickNumber,
+        round: pick.round,
+      })),
+    }));
+
+    res.json(response);
+  } catch (error) {
+    throw error;
+  }
+}

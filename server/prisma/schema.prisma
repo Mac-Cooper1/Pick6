@@ -1,0 +1,102 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+
+  leagueMembers LeagueMember[]
+  draftPicks    DraftPick[]
+  weeklyScores  WeeklyScore[]
+}
+
+model League {
+  id            Int      @id @default(autoincrement())
+  name          String
+  joinCode      String   @unique
+  password      String   // Hashed with bcrypt
+  maxPlayers    Int
+  draftComplete Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  members      LeagueMember[]
+  draftPicks   DraftPick[]
+  weeklyScores WeeklyScore[]
+}
+
+model LeagueMember {
+  id        Int      @id @default(autoincrement())
+  leagueId  Int
+  userId    Int
+  joinedAt  DateTime @default(now())
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([leagueId, userId])
+}
+
+model Team {
+  id         Int    @id @default(autoincrement())
+  name       String @unique
+  conference String
+
+  draftPicks  DraftPick[]
+  gameResults GameResult[]
+}
+
+model DraftPick {
+  id         Int @id @default(autoincrement())
+  leagueId   Int
+  userId     Int
+  teamId     Int
+  pickNumber Int
+  round      Int
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  @@unique([leagueId, pickNumber])
+  @@unique([leagueId, teamId])
+}
+
+model WeeklyScore {
+  id         Int      @id @default(autoincrement())
+  leagueId   Int
+  userId     Int
+  weekNumber Int
+  points     Int
+  updatedAt  DateTime @updatedAt
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([leagueId, userId, weekNumber])
+}
+
+model GameResult {
+  id         Int      @id @default(autoincrement())
+  teamId     Int
+  weekNumber Int
+  opponent   String
+  result     String   // 'win' or 'loss'
+  wasUpset   Boolean  @default(false)
+  points     Int      // Points awarded (2 for upset win, 1 for win, 0 for loss, -1 for upset loss)
+  gameDate   DateTime
+
+  team Team @relation(fields: [teamId], references: [id])
+
+  @@unique([teamId, weekNumber])
+}
