@@ -247,7 +247,6 @@ export async function getLeagueMembers(req: AuthRequest, res: Response, next: an
     const members = await prisma.leagueMember.findMany({
       where: { leagueId },
       include: {
-        user: true,
         user: {
           include: {
             draftPicks: {
