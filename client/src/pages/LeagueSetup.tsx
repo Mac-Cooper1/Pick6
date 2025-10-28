@@ -33,10 +33,12 @@ export function LeagueSetup() {
     const fetchUserLeagues = async () => {
       try {
         const currentUser = await authApi.getCurrentUser();
-        if (currentUser.leagues && currentUser.leagues.length > 0) {
-          setMyLeagues(currentUser.leagues);
-          setFlowMode('myLeagues');
-        }
+        // TODO: Implement leagues fetching when backend endpoint is ready
+        // if (currentUser.leagues && currentUser.leagues.length > 0) {
+        //   setMyLeagues(currentUser.leagues);
+        //   setFlowMode('myLeagues');
+        // }
+        console.log('Current user:', currentUser);
       } catch (err) {
         console.error('Failed to fetch leagues:', err);
       }
