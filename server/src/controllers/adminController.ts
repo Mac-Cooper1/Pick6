@@ -1,9 +1,10 @@
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest, GameResultRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
+import { syncWeek, syncWeekGames, syncOdds, finalizeGames, calculateLeagueScores, syncAllLeagues } from '../services/syncService';
+import { getGamesForWeek } from '../services/espnClient';
+import { getNCAAFSpreads, isOddsApiConfigured } from '../services/oddsClient';
 
 /**
  * Calculate points for a game result
@@ -226,6 +227,264 @@ export async function getGameResults(req: AuthRequest, res: Response) {
     }));
 
     res.json(response);
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Sync a week's games, odds, and calculate scores for a league
+ * POST /api/admin/sync-week/:leagueId/:weekNumber
+ * Query: ?seasonYear=2024 (optional, defaults to league's seasonYear)
+ */
+export async function syncWeekEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const leagueId = parseInt(req.params.leagueId);
+    const weekNumber = parseInt(req.params.weekNumber);
+    const seasonYear = req.query.seasonYear
+      ? parseInt(req.query.seasonYear as string)
+      : undefined;
+
+    if (isNaN(leagueId) || isNaN(weekNumber)) {
+      throw new AppError('Invalid league ID or week number', 400);
+    }
+
+    // Get league to get season year
+    const league = await prisma.league.findUnique({
+      where: { id: leagueId },
+    });
+
+    if (!league) {
+      throw new AppError('League not found', 404);
+    }
+
+    const year = seasonYear || league.seasonYear;
+
+    console.log(`[Admin] Starting sync for league ${leagueId}, week ${weekNumber}, season ${year}`);
+
+    const result = await syncWeek(leagueId, year, weekNumber);
+
+    res.json({
+      success: true,
+      leagueId,
+      weekNumber,
+      seasonYear: year,
+      ...result,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Sync games only (no scores calculation)
+ * POST /api/admin/sync-games/:seasonYear/:weekNumber
+ */
+export async function syncGamesEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const seasonYear = parseInt(req.params.seasonYear);
+    const weekNumber = parseInt(req.params.weekNumber);
+
+    if (isNaN(seasonYear) || isNaN(weekNumber)) {
+      throw new AppError('Invalid season year or week number', 400);
+    }
+
+    const { games, errors } = await syncWeekGames(seasonYear, weekNumber);
+
+    res.json({
+      success: true,
+      seasonYear,
+      weekNumber,
+      gamesSync: games.length,
+      errors,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Sync odds only
+ * POST /api/admin/sync-odds
+ */
+export async function syncOddsEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const { updated, errors } = await syncOdds();
+
+    res.json({
+      success: true,
+      oddsUpdated: updated,
+      errors,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Finalize games and detect upsets
+ * POST /api/admin/finalize-games/:seasonYear/:weekNumber
+ */
+export async function finalizeGamesEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const seasonYear = parseInt(req.params.seasonYear);
+    const weekNumber = parseInt(req.params.weekNumber);
+
+    if (isNaN(seasonYear) || isNaN(weekNumber)) {
+      throw new AppError('Invalid season year or week number', 400);
+    }
+
+    const { finalized, upsets } = await finalizeGames(seasonYear, weekNumber);
+
+    res.json({
+      success: true,
+      seasonYear,
+      weekNumber,
+      gamesFinalized: finalized,
+      upsetsDetected: upsets,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Get ESPN games for a week (preview without saving)
+ * GET /api/admin/espn-games/:seasonYear/:weekNumber
+ */
+export async function previewEspnGames(req: AuthRequest, res: Response) {
+  try {
+    const seasonYear = parseInt(req.params.seasonYear);
+    const weekNumber = parseInt(req.params.weekNumber);
+
+    if (isNaN(seasonYear) || isNaN(weekNumber)) {
+      throw new AppError('Invalid season year or week number', 400);
+    }
+
+    const games = await getGamesForWeek(seasonYear, weekNumber);
+
+    res.json({
+      seasonYear,
+      weekNumber,
+      gameCount: games.length,
+      games: games.map((g) => ({
+        espnEventId: g.espnEventId,
+        homeTeam: g.homeTeam.displayName,
+        awayTeam: g.awayTeam.displayName,
+        startTime: g.startTime,
+        status: g.status,
+        homeScore: g.homeScore,
+        awayScore: g.awayScore,
+        isCompleted: g.isCompleted,
+      })),
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Get current odds (preview without saving)
+ * GET /api/admin/current-odds
+ */
+export async function previewCurrentOdds(req: AuthRequest, res: Response) {
+  try {
+    if (!isOddsApiConfigured()) {
+      throw new AppError('ODDS_API_KEY is not configured', 400);
+    }
+
+    const odds = await getNCAAFSpreads();
+
+    res.json({
+      gameCount: odds.length,
+      games: odds.map((o) => ({
+        homeTeam: o.homeTeam,
+        awayTeam: o.awayTeam,
+        commenceTime: o.commenceTime,
+        spread: o.spread,
+        favoriteTeam: o.favoriteTeam,
+        bookmaker: o.bookmaker,
+      })),
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Get games from database for a week
+ * GET /api/admin/games/:seasonYear/:weekNumber
+ */
+export async function getGames(req: AuthRequest, res: Response) {
+  try {
+    const seasonYear = parseInt(req.params.seasonYear);
+    const weekNumber = parseInt(req.params.weekNumber);
+
+    if (isNaN(seasonYear) || isNaN(weekNumber)) {
+      throw new AppError('Invalid season year or week number', 400);
+    }
+
+    const games = await prisma.game.findMany({
+      where: {
+        seasonYear,
+        weekNumber,
+      },
+      include: {
+        homeTeam: true,
+        awayTeam: true,
+        winnerTeam: true,
+        favoriteTeam: true,
+      },
+      orderBy: {
+        startTime: 'asc',
+      },
+    });
+
+    res.json({
+      seasonYear,
+      weekNumber,
+      gameCount: games.length,
+      games: games.map((g) => ({
+        id: g.id,
+        espnEventId: g.espnEventId,
+        homeTeam: g.homeTeam.name,
+        awayTeam: g.awayTeam.name,
+        startTime: g.startTime,
+        status: g.status,
+        homeScore: g.homeScore,
+        awayScore: g.awayScore,
+        winner: g.winnerTeam?.name,
+        spread: g.spread,
+        favorite: g.favoriteTeam?.name,
+        wasUpset: g.wasUpset,
+      })),
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Sync all leagues for a week (after games are synced)
+ * POST /api/admin/sync-all-leagues/:seasonYear/:weekNumber
+ */
+export async function syncAllLeaguesEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const seasonYear = parseInt(req.params.seasonYear);
+    const weekNumber = parseInt(req.params.weekNumber);
+
+    if (isNaN(seasonYear) || isNaN(weekNumber)) {
+      throw new AppError('Invalid season year or week number', 400);
+    }
+
+    const { leagueResults } = await syncAllLeagues(seasonYear, weekNumber);
+
+    res.json({
+      success: true,
+      seasonYear,
+      weekNumber,
+      leagueResults,
+    });
   } catch (error) {
     throw error;
   }

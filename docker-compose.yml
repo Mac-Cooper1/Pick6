@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: pick6-postgres
+    environment:
+      POSTGRES_USER: pick6
+      POSTGRES_PASSWORD: pick6local
+      POSTGRES_DB: pick6
+    ports:
+      - "5432:5432"
+    volumes:
+      - pick6_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pick6 -d pick6"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pick6_postgres_data:

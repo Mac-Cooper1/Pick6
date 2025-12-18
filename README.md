@@ -6,14 +6,100 @@ Pick 6 is a fantasy college football application where users draft 6 college tea
 
 - **Simple Drafting**: Pick 6 college teams and you're done
 - **Private Leagues**: Create or join private leagues with unique join codes
-- **Snake Draft**: Fair draft system that reverses order each round
+- **Scheduled Drafts**: Commissioner sets draft date/time with countdown timer
+- **Snake Draft**: Fair draft system that reverses order each round with timed picks and auto-pick
+- **Draft Queue**: Pre-queue your picks so autopick selects your preferences
+- **Auto-Start**: Drafts automatically begin when scheduled time arrives
+- **My Leagues Dashboard**: View all your leagues with status, draft times, and records
 - **Dynamic Scoring**:
   - Win = +1 point
   - Loss = 0 points
   - Upset Win (underdog) = +2 points
   - Upset Loss (favorite) = -1 point
-- **Real-time Updates**: Live draft board and standings updates
+- **Automated Scoring**: Real scores fetched from ESPN, odds from The Odds API
+- **Live Matchups**: View your teams' upcoming games with odds and game times
+- **Smart Caching**: API responses cached to optimize performance and protect rate limits
+- **Roster Management**: View all rosters in your league
+- **Waiver Wire**: ESPN-style waiver claims with priority based on standings
+- **Free Agency**: Instant pickups after waiver period
+- **FAAB Auction**: Midseason blind auction system with virtual currency
+  - One auction window per season (commissioner configurable)
+  - Blind bidding - high bid amount shown but bidder hidden
+  - Kickoff locks - can't bid on teams whose games have started
+  - Budget management - $100 default FAAB budget per user
+- **Real-time Updates**: Live draft board, auction, and standings updates
 - **Mobile Responsive**: Works seamlessly on desktop and mobile
+
+## How Scoring Works
+
+Pick 6 uses a two-tier scoring system that rewards both consistency and upsets:
+
+### Automated Scoring Flow
+
+1. **Game Data**: ESPN's hidden API fetches real college football scores
+2. **Odds Data**: The Odds API provides pre-game spreads to identify favorites
+3. **Upset Detection**: When an underdog wins, it's automatically flagged as an upset
+4. **Score Calculation**: Points are awarded based on win/loss and upset status
+
+### Point Values
+
+| Result | Points | Description |
+|--------|--------|-------------|
+| Regular Win | +1 | Your team wins as expected |
+| Upset Win | +2 | Your underdog team beats a favorite |
+| Regular Loss | 0 | Your team loses as expected |
+| Upset Loss | -1 | Your favored team loses to an underdog |
+
+This creates strategic depth: picking heavy favorites is safe but limits upside, while underdogs carry risk but offer bigger rewards.
+
+## FAAB Auction System
+
+The FAAB (Free Agent Acquisition Budget) Auction is a midseason roster management feature that allows all league members to bid on available teams using virtual currency.
+
+### How It Works
+
+1. **Commissioner Setup**: The commissioner creates a single auction event with:
+   - Week number (e.g., Week 7)
+   - Open time (when bidding starts)
+   - Close time (when bidding ends)
+
+2. **Bidding Period**:
+   - All members start with $100 FAAB budget
+   - Place bids on any available (not rostered) team
+   - Each bid requires specifying a team to drop (rosters stay at 6)
+   - High bid amounts are shown, but bidder identity is hidden
+   - You can update or cancel your bids anytime while auction is open
+
+3. **Kickoff Locks**:
+   - Teams whose games start before the auction closes are LOCKED
+   - This prevents gaming the system by bidding on teams mid-game
+   - If kickoff time can't be determined, team is conservatively locked
+
+4. **Finalization**:
+   - When auction closes, highest bid wins each team
+   - Ties go to earliest bid
+   - Winning bid amount is deducted from winner's budget
+   - Rosters are updated (drop team removed, won team added)
+   - Winners are revealed to all members
+
+### FAAB Rules
+
+| Rule | Value | Notes |
+|------|-------|-------|
+| Starting Budget | $100 | Configurable per league |
+| Min Bid | $0 | Free bids allowed |
+| Roster Size | 6 | Teams per user |
+| Auction Events | 1 | One midseason auction per league |
+| Bid Type | Blind | Others see high bid, not bidder |
+
+### Testing the Auction
+
+```bash
+cd server
+npx tsx scripts/test-auction.ts
+```
+
+This creates a test scenario with conflicting bids and verifies the finalization logic.
 
 ## Tech Stack
 
@@ -23,7 +109,6 @@ Pick 6 is a fantasy college football application where users draft 6 college tea
 - Tailwind CSS for styling
 - React Router for navigation
 - Axios for API calls
-- React Query for data fetching/caching
 
 ### Backend
 - Node.js with Express
@@ -33,33 +118,35 @@ Pick 6 is a fantasy college football application where users draft 6 college tea
 - JWT authentication
 - bcrypt for password hashing
 
+### External APIs
+- **ESPN API** (hidden/unofficial): Game scores and schedules
+- **The Odds API**: Pre-game spreads for upset detection
+
 ## Project Structure
 
 ```
 pick6/
 ├── client/                 # React frontend
 │   ├── src/
-│   │   ├── components/    # Reusable components
-│   │   ├── pages/         # Page components
+│   │   ├── components/    # Reusable components (DraftTab, RosterTab, WaiverTab, etc.)
+│   │   ├── pages/         # Page components (Landing, MainApp, LeagueSetup)
 │   │   ├── contexts/      # React contexts (Auth)
 │   │   ├── services/      # API service layer
-│   │   ├── types/         # TypeScript types
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── package.json
-│   └── vite.config.ts
-├── server/                # Express backend
+│   │   └── types/         # TypeScript types
+├── server/                 # Express backend
 │   ├── src/
 │   │   ├── controllers/   # Route controllers
 │   │   ├── middleware/    # Auth, error handling
 │   │   ├── routes/        # API routes
-│   │   ├── types/         # TypeScript types
-│   │   ├── utils/         # Helper functions
-│   │   └── server.ts
+│   │   ├── services/      # ESPN client, Odds client, sync service
+│   │   ├── lib/           # Prisma client, env validation
+│   │   └── types/         # TypeScript types
 │   ├── prisma/
-│   │   ├── schema.prisma
-│   │   └── seed.ts
-│   └── package.json
+│   │   ├── schema.prisma  # Database schema
+│   │   └── seed.ts        # Team seeding with ESPN IDs
+│   └── scripts/
+│       └── integration-test.ts
+├── docker-compose.yml      # Local PostgreSQL setup
 └── README.md
 ```
 
@@ -68,136 +155,104 @@ pick6/
 ### Prerequisites
 
 - Node.js (v18 or higher)
-- PostgreSQL (v14 or higher)
+- Docker (recommended for local Postgres) or PostgreSQL (v14 or higher)
 - npm or yarn
 
-### Installation
+### Quick Start with Docker (Recommended)
 
-1. **Clone the repository**
+1. **Clone and start the database**
    ```bash
    cd Pick6
+   docker compose up -d
    ```
+   Note: If using older Docker, use `docker-compose up -d` instead.
 
-2. **Set up PostgreSQL database**
-   ```bash
-   # Create a PostgreSQL database named 'pick6'
-   createdb pick6
-
-   # Or using psql:
-   psql -U postgres
-   CREATE DATABASE pick6;
-   ```
-
-3. **Set up the server**
+2. **Set up the server**
    ```bash
    cd server
    npm install
-
-   # Copy environment file and update DATABASE_URL
    cp .env.example .env
-   # Edit .env and update DATABASE_URL with your PostgreSQL credentials
+   # .env already configured for local Docker postgres
 
-   # Run Prisma migrations
    npm run prisma:generate
-   npm run prisma:migrate
-
-   # Seed the database with college teams
+   npm run prisma:migrate dev
    npm run prisma:seed
    ```
 
-4. **Set up the client**
+3. **Set up the client**
    ```bash
    cd ../client
    npm install
-
-   # Copy environment file
-   cp .env.example .env
    ```
 
-### Running the Application
-
-1. **Start the server** (from server directory)
+4. **Run the app**
    ```bash
-   cd server
-   npm run dev
+   # Terminal 1 (server)
+   cd server && npm run dev
+
+   # Terminal 2 (client)
+   cd client && npm run dev
    ```
-   Server will run on http://localhost:3001
 
-2. **Start the client** (from client directory, in a new terminal)
-   ```bash
-   cd client
-   npm run dev
-   ```
-   Client will run on http://localhost:3000
+5. Open http://localhost:3000
 
-3. **Open your browser**
-   Navigate to http://localhost:3000
+### Manual PostgreSQL Setup
 
-## Usage Guide
-
-### Creating a League
-
-1. Sign up or sign in with your name and email
-2. Click "Create League"
-3. Enter league name, select max players (8-12), and set a password
-4. Optionally set a custom join code (6 characters)
-5. Share the join code and password with friends
-
-### Joining a League
-
-1. Sign up or sign in
-2. Click "Join League"
-3. Enter the join code and password provided by the league creator
-
-### Drafting Teams
-
-1. Navigate to the "Draft" tab
-2. Use the search box to find teams
-3. Click "Draft" to select a team
-4. The draft follows a snake order (1→N, N→1, 1→N, etc.)
-5. Each player drafts 6 teams total
-
-### Viewing Standings
-
-1. Navigate to the "Standings" tab
-2. View weekly standings and overall season standings
-3. Use arrows to navigate between weeks
-
-## Admin Functions (MVP)
-
-For the MVP, game results and scoring are manual:
-
-### Entering Game Results
-
-Use API endpoint or tools like Postman/Insomnia:
+If not using Docker:
 
 ```bash
-POST http://localhost:3001/api/admin/game-result
-Authorization: Bearer <your-jwt-token>
-Content-Type: application/json
-
-{
-  "teamId": 1,
-  "weekNumber": 5,
-  "opponent": "LSU",
-  "result": "win",
-  "wasUpset": true,
-  "gameDate": "2024-10-12T19:00:00Z"
-}
+createdb pick6
+cd server
+cp .env.example .env
+# Edit .env: DATABASE_URL=postgresql://user:password@localhost:5432/pick6
 ```
 
-### Calculating Weekly Scores
+Then follow steps 2-4 above.
 
-After entering all game results for a week:
+## Environment Variables
+
+### Server (.env)
 
 ```bash
-POST http://localhost:3001/api/admin/calculate-scores/:leagueId/:weekNumber
-Authorization: Bearer <your-jwt-token>
+# Required
+DATABASE_URL=postgresql://pick6:pick6local@localhost:5432/pick6
+JWT_SECRET=pick6-super-secret-jwt-key-change-in-production
+
+# Optional (with defaults)
+PORT=3001
+NODE_ENV=development
+CORS_ORIGIN=*
+
+# External APIs (required for automated scoring)
+ODDS_API_KEY=your-api-key-from-the-odds-api.com
+ESPN_GROUP_ID=80  # 80 = FBS Division I
 ```
 
-Example:
+### Getting an Odds API Key
+
+1. Sign up at https://the-odds-api.com/
+2. Get your free API key (500 requests/month free tier)
+3. Add to your `.env` file
+
+Without an ODDS_API_KEY, the app will still work but won't automatically detect upsets.
+
+### API Caching
+
+To protect rate limits and improve performance, the app caches external API responses:
+
+| API Endpoint | Cache TTL | Purpose |
+|--------------|-----------|---------|
+| ESPN Scoreboard | 60 seconds | Live game scores |
+| ESPN Schedule | 5 minutes | Weekly schedule |
+| Odds API | 15 minutes | Pre-game spreads and odds |
+| Team Matchups | 5 minutes | Combined roster + game data |
+
+The Odds API has a 500 requests/month free tier limit. With 15-minute caching, you can safely make ~2,880 cached requests without hitting the underlying API more than necessary.
+
+### Client (.env)
+
 ```bash
-POST http://localhost:3001/api/admin/calculate-scores/1/5
+VITE_API_URL=http://localhost:3001  # Only needed in production
 ```
 
 ## API Endpoints
@@ -208,138 +263,215 @@ POST http://localhost:3001/api/admin/calculate-scores/1/5
 - `GET /me` - Get current user (protected)
 
 ### League Routes (`/api/leagues`)
-- `POST /create` - Create new league (protected)
-- `POST /join` - Join existing league (protected)
-- `GET /:leagueId` - Get league details (protected)
-- `GET /:leagueId/members` - Get all members (protected)
+- `GET /my` - Get all leagues for current user (My Leagues dashboard)
+- `POST /create` - Create new league
+- `POST /join` - Join existing league
+- `GET /:leagueId` - Get league details
+- `GET /:leagueId/members` - Get all members
+- `PATCH /:leagueId/settings` - Update league settings (commissioner only)
 
 ### Draft Routes (`/api/draft`)
-- `GET /teams` - Get all teams (protected)
-- `GET /:leagueId/picks` - Get draft picks (protected)
-- `POST /:leagueId/pick` - Draft a team (protected)
-- `GET /:leagueId/available` - Get available teams (protected)
+- `GET /teams` - Get all teams
+- `POST /:leagueId/start` - Start the draft
+- `GET /:leagueId/state` - Get current draft state
+- `POST /:leagueId/pick` - Draft a team
+- `POST /:leagueId/autopick` - Trigger autopick
+- `GET /:leagueId/queue` - Get user's draft queue
+- `PUT /:leagueId/queue` - Set draft queue
+- `GET /:leagueId/available` - Get available teams
+
+### Roster Routes (`/api/rosters`)
+- `GET /:leagueId` - Get all rosters
+- `GET /:leagueId/my` - Get current user's roster
+- `GET /:leagueId/available` - Get available free agents
+- `GET /:leagueId/waiver-priority` - Get waiver order
+- `POST /:leagueId/waivers` - Submit waiver claim
+- `DELETE /:leagueId/waivers/:claimId` - Cancel claim
+- `POST /:leagueId/waivers/process` - Process waivers (admin)
+- `POST /:leagueId/free-agent` - Add free agent
+- `GET /:leagueId/matchups` - Get current user's team matchups with ESPN/Odds data
+- `GET /:leagueId/matchups/all` - Get all rosters with matchups
+
+### Auction Routes (`/api/auction`)
+- `GET /:leagueId` - Get auction state (status, timing, budgets, high bids)
+- `POST /:leagueId/create` - Create auction event (commissioner only)
+- `DELETE /:leagueId` - Delete auction (commissioner only, before start)
+- `POST /:leagueId/open` - Manually open auction
+- `POST /:leagueId/bid` - Place a bid (addTeamId, dropTeamId, amount)
+- `POST /:leagueId/cancel-bid` - Cancel a bid
+- `POST /:leagueId/finalize` - Finalize auction and process winners
+- `GET /:leagueId/available-teams` - Get available teams with kickoff lock status
+- `GET /:leagueId/high-bids` - Get current high bids (anonymous)
+- `GET /:leagueId/my-bids` - Get user's bids
+- `GET /:leagueId/my-roster` - Get user's roster for drop selection
+
+### CFB Routes (`/api/cfb`)
+- `GET /scoreboard` - Get live ESPN scoreboard (cached 60s)
+- `GET /schedule` - Get weekly schedule (cached 5min)
+- `GET /game/:eventId` - Get specific game details
+
+### Odds Routes (`/api/odds`)
+- `GET /ncaaf` - Get all NCAAF odds (cached 15min)
+- `GET /ncaaf/game/:homeTeam/:awayTeam` - Get odds for specific game
+- `GET /status` - Check Odds API status and remaining requests
 
 ### Standings Routes (`/api/standings`)
-- `GET /:leagueId/week/:weekNumber` - Get weekly standings (protected)
-- `GET /:leagueId/overall` - Get overall standings (protected)
+- `GET /:leagueId/week/:weekNumber` - Get weekly standings
+- `GET /:leagueId/overall` - Get overall standings
 
 ### Admin Routes (`/api/admin`)
-- `POST /game-result` - Enter game result (protected)
-- `POST /calculate-scores/:leagueId/:weekNumber` - Calculate scores (protected)
-- `GET /game-results/:weekNumber` - Get game results (protected)
+
+#### Automated Scoring (New!)
+- `POST /sync-week/:leagueId/:weekNumber` - Full sync: ESPN games + odds + scores
+- `POST /sync-games/:seasonYear/:weekNumber` - Sync games from ESPN
+- `POST /sync-odds` - Sync current odds
+- `POST /finalize-games/:seasonYear/:weekNumber` - Finalize and detect upsets
+- `GET /espn-games/:seasonYear/:weekNumber` - Preview ESPN data
+- `GET /current-odds` - Preview current odds
+- `GET /games/:seasonYear/:weekNumber` - Get synced games
+
+#### Manual Entry (Legacy)
+- `POST /game-result` - Enter game result manually
+- `POST /calculate-scores/:leagueId/:weekNumber` - Calculate scores manually
+- `GET /game-results/:weekNumber` - Get manual game results
+
+### Sync a Week's Scores
+
+To update all scores for a week:
+
+```bash
+# Full automated sync
+curl -X POST http://localhost:3001/api/admin/sync-week/1/5 \
+  -H "Authorization: Bearer <token>"
+
+# Or step by step:
+# 1. Sync games from ESPN
+curl -X POST http://localhost:3001/api/admin/sync-games/2024/5 \
+  -H "Authorization: Bearer <token>"
+
+# 2. Sync odds (run before games start)
+curl -X POST http://localhost:3001/api/admin/sync-odds \
+  -H "Authorization: Bearer <token>"
+
+# 3. After games finish, finalize and detect upsets
+curl -X POST http://localhost:3001/api/admin/finalize-games/2024/5 \
+  -H "Authorization: Bearer <token>"
+```
 
 ## Database Schema
 
-The application uses PostgreSQL with Prisma ORM. Key models:
+Key models (see [server/prisma/schema.prisma](server/prisma/schema.prisma)):
 
 - **User**: User accounts
-- **League**: League information
-- **LeagueMember**: User-league relationships
-- **Team**: College football teams (130 FBS teams)
-- **DraftPick**: Draft selections
-- **WeeklyScore**: Weekly point totals
-- **GameResult**: Game outcomes and points
+- **League**: League settings, draft state, current week
+- **LeagueMember**: User-league relationships with draft position
+- **Team**: 130 FBS teams with ESPN IDs and abbreviations
+- **DraftPick**: Draft selections with auto-pick tracking
+- **DraftQueue**: User's pre-draft preferences
+- **Game**: ESPN game data with scores, odds, upset flags
+- **GameResult**: Legacy manual game entry
+- **RosterTeam**: Team ownership with acquisition tracking (DRAFT, WAIVER, FREE_AGENT, AUCTION)
+- **WaiverClaim**: Pending/processed waiver requests
+- **WeeklyScore**: Point totals per user per week
+- **AuctionEvent**: FAAB auction configuration and status
+- **AuctionBid**: Individual bids with status tracking
 
-See [server/prisma/schema.prisma](server/prisma/schema.prisma) for the complete schema.
+## Running Tests
+
+```bash
+cd server
+npx tsx scripts/integration-test.ts
+```
+
+This tests:
+- User creation
+- League creation and joining
+- Full snake draft simulation
+- Mock game sync
+- Score calculation
+- Standings generation
+- Waiver claim submission
 
 ## Available Scripts
 
 ### Server
-- `npm run dev` - Start development server with hot reload
+- `npm run dev` - Start development server
 - `npm run build` - Build for production
 - `npm start` - Start production server
 - `npm run prisma:generate` - Generate Prisma client
-- `npm run prisma:migrate` - Run database migrations
-- `npm run prisma:seed` - Seed database with teams
-- `npm run prisma:studio` - Open Prisma Studio
+- `npm run prisma:migrate` - Run migrations
+- `npm run prisma:seed` - Seed teams
 
 ### Client
 - `npm run dev` - Start development server
 - `npm run build` - Build for production
-- `npm run preview` - Preview production build
-
-## Environment Variables
-
-### Server (`.env`)
-```
-DATABASE_URL=postgresql://user:password@localhost:5432/pick6
-JWT_SECRET=your-secret-key-change-in-production
-PORT=3001
-NODE_ENV=development
-```
-
-### Client (`.env`)
-```
-VITE_API_URL=http://localhost:3001
-```
-
-## Production Deployment
-
-### Preparing for Production
-
-1. **Update environment variables**
-   - Generate a strong JWT_SECRET
-   - Update DATABASE_URL to production database
-   - Set NODE_ENV=production
-
-2. **Build the client**
-   ```bash
-   cd client
-   npm run build
-   ```
-
-3. **Build the server**
-   ```bash
-   cd server
-   npm run build
-   ```
-
-4. **Run migrations on production database**
-   ```bash
-   npm run prisma:migrate
-   npm run prisma:seed
-   ```
-
-### Deployment Options
-
-- **Frontend**: Vercel, Netlify, or any static hosting
-- **Backend**: Railway, Render, Heroku, or any Node.js hosting
-- **Database**: Supabase, Railway, Render, or any PostgreSQL hosting
-
-## Future Enhancements
-
-Features not included in MVP but planned for future releases:
-
-- Live score integration from sports APIs
-- Automated upset detection via odds APIs
-- Real-time draft synchronization with WebSockets
-- Email notifications
-- Password reset flows
-- User profiles and avatars
-- Multiple leagues per user
-- Trade system
-- Chat/messaging
-- Mobile apps (iOS/Android)
 
 ## Troubleshooting
 
-### Database Connection Issues
-- Verify PostgreSQL is running: `pg_isready`
-- Check DATABASE_URL in `.env`
-- Ensure database exists: `psql -l`
+### "Tenant or user not found" Database Error
 
-### Port Already in Use
-- Change PORT in server `.env`
-- Update VITE_API_URL in client `.env`
-- Update proxy in client `vite.config.ts`
+This means the database connection failed. Common causes:
+- Database not running: `docker-compose up -d`
+- Wrong credentials: Check DATABASE_URL in `.env`
+- Database doesn't exist: Run migrations
 
-### Prisma Issues
-```bash
-# Reset database and reseed
-cd server
-npm run db:reset
-npm run prisma:seed
+### Environment Validation Fails
+
+The server now validates required env vars at startup:
 ```
+❌ Environment validation failed:
+   - DATABASE_URL is required
+   - JWT_SECRET is required
+```
+
+Create a `.env` file from `.env.example`.
+
+### ESPN API Returns Empty
+
+- Check the week number is valid for the season
+- ESPN group ID 80 is for FBS; adjust if needed
+- Games may not be available until close to kickoff
+
+### Odds API Errors
+
+- Verify your API key is set in ODDS_API_KEY
+- Free tier has 500 requests/month limit
+- NCAAF odds only available during season
+
+### Port Conflicts
+
+Change ports in:
+- `server/.env`: `PORT=3001`
+- `client/.env`: `VITE_API_URL`
+- `client/vite.config.ts`: proxy target
+
+## Production Deployment
+
+1. **Set production environment variables**
+   ```bash
+   DATABASE_URL=postgresql://... (production DB)
+   JWT_SECRET=<long-random-string>
+   NODE_ENV=production
+   CORS_ORIGIN=https://your-frontend.com
+   ODDS_API_KEY=<your-key>
+   ```
+
+2. **Build and deploy**
+   ```bash
+   # Client
+   cd client && npm run build
+   # Deploy dist/ to Vercel, Netlify, etc.
+
+   # Server
+   cd server && npm run build
+   # Deploy to Railway, Render, Fly.io, etc.
+   ```
+
+3. **Run migrations on production**
+   ```bash
+   npm run prisma:migrate deploy
+   npm run prisma:seed
+   ```
 
 ## Contributing
 
@@ -348,10 +480,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 MIT
-
-## Contact
-
-For questions or support, please open an issue on GitHub.
 
 ---
 

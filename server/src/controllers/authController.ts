@@ -1,10 +1,8 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { generateToken } from '../utils/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 /**
  * Register a new user or login existing user

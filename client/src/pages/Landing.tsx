@@ -35,12 +35,12 @@ export function Landing() {
       if (authMode === 'signup') {
         // Register new user
         await register(name, email);
-        navigate('/league-setup');
+        navigate('/dashboard');
       } else {
         // Try to login existing user
         try {
           await login(email);
-          navigate('/league-setup');
+          navigate('/dashboard');
         } catch (err: any) {
           // If user not found, show helpful error
           if (err.response?.status === 404) {

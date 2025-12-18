@@ -19,6 +19,9 @@ model User {
   leagueMembers LeagueMember[]
   draftPicks    DraftPick[]
   weeklyScores  WeeklyScore[]
+  rosterTeams   RosterTeam[]
+  waiverClaims  WaiverClaim[]
+  draftQueues   DraftQueue[]
 }
 
 model League {
@@ -27,12 +30,50 @@ model League {
   joinCode      String   @unique
   password      String   // Hashed with bcrypt
   maxPlayers    Int
+  rosterSize    Int      @default(6) // Teams per roster
   draftComplete Boolean  @default(false)
+  seasonYear    Int      @default(2024)
+  currentWeek   Int      @default(1)
   createdAt     DateTime @default(now())
 
-  members      LeagueMember[]
-  draftPicks   DraftPick[]
-  weeklyScores WeeklyScore[]
+  // Draft configuration (set by commissioner)
+  draftType          DraftType   @default(SNAKE)
+  draftScheduledAt   DateTime?   // When draft is scheduled to begin (UTC)
+  draftStatus        DraftStatus @default(NOT_STARTED)
+  pickDeadlineSeconds Int        @default(60) // Seconds per pick (default 60s)
+
+  // Draft state (runtime)
+  draftStarted       Boolean   @default(false)
+  draftStartTime     DateTime? // Actual time draft started
+  currentPickNumber  Int       @default(0)
+  currentPickDeadline DateTime?
+
+  // FAAB Auction configuration
+  faabBudget         Int       @default(100) // Starting FAAB budget per member
+
+  // Commissioner is the first member to create/join
+  commissionerUserId Int?
+
+  members       LeagueMember[]
+  draftPicks    DraftPick[]
+  weeklyScores  WeeklyScore[]
+  rosterTeams   RosterTeam[]
+  waiverClaims  WaiverClaim[]
+  draftQueues   DraftQueue[]
+  auctionEvents AuctionEvent[]
+}
+
+enum DraftType {
+  SNAKE
+  LINEAR
+}
+
+enum DraftStatus {
+  NOT_STARTED
+  SCHEDULED
+  LIVE
+  PAUSED
+  COMPLETE
 }
 
 model LeagueMember {
@@ -41,28 +82,61 @@ model LeagueMember {
   userId    Int
   joinedAt  DateTime @default(now())
 
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Draft order position (assigned when draft starts)
+  draftPosition Int?
+
+  // Member role
+  role      MemberRole @default(MEMBER)
+
+  // Waiver priority (lower = higher priority, updated weekly)
+  waiverPriority Int?
+
+  // FAAB budget remaining (initialized to league.faabBudget when auction opens)
+  faabBudgetRemaining Int @default(100)
+
+  league      League       @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auctionBids AuctionBid[]
 
   @@unique([leagueId, userId])
 }
 
-model Team {
-  id         Int    @id @default(autoincrement())
-  name       String @unique
-  conference String
+enum MemberRole {
+  COMMISSIONER
+  MEMBER
+}
 
-  draftPicks  DraftPick[]
-  gameResults GameResult[]
+model Team {
+  id           Int     @id @default(autoincrement())
+  name         String  @unique
+  conference   String
+  abbreviation String? // e.g., "ALA", "UGA", "OSU"
+  espnTeamId   String? // ESPN's internal team ID for API matching
+  espnDisplayName String? // ESPN display name for matching
+  oddsApiName  String? // Name used by The Odds API for matching
+
+  draftPicks   DraftPick[]
+  gameResults  GameResult[]
+  rosterTeams  RosterTeam[]
+  draftQueues  DraftQueue[]
+  homeGames    Game[]       @relation("HomeTeam")
+  awayGames    Game[]       @relation("AwayTeam")
+  wonGames     Game[]       @relation("WinnerTeam")
+  favoredGames Game[]       @relation("FavoriteTeam")
+
+  @@index([espnTeamId])
+  @@index([oddsApiName])
 }
 
 model DraftPick {
-  id         Int @id @default(autoincrement())
+  id         Int      @id @default(autoincrement())
   leagueId   Int
   userId     Int
   teamId     Int
   pickNumber Int
   round      Int
+  pickedAt   DateTime @default(now())
+  wasAutoPick Boolean @default(false)
 
   league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -70,6 +144,23 @@ model DraftPick {
 
   @@unique([leagueId, pickNumber])
   @@unique([leagueId, teamId])
+}
+
+// User's draft queue - teams they want in priority order
+model DraftQueue {
+  id        Int      @id @default(autoincrement())
+  leagueId  Int
+  userId    Int
+  teamId    Int
+  priority  Int      // Lower number = higher priority
+  createdAt DateTime @default(now())
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  @@unique([leagueId, userId, teamId])
+  @@index([leagueId, userId, priority])
 }
 
 model WeeklyScore {
@@ -86,6 +177,7 @@ model WeeklyScore {
   @@unique([leagueId, userId, weekNumber])
 }
 
+// Legacy game result model (kept for backwards compatibility with manual entry)
 model GameResult {
   id         Int      @id @default(autoincrement())
   teamId     Int
@@ -99,4 +191,195 @@ model GameResult {
   team Team @relation(fields: [teamId], references: [id])
 
   @@unique([teamId, weekNumber])
+}
+
+// Game model for automated scoring with ESPN/Odds API integration
+model Game {
+  id            Int      @id @default(autoincrement())
+  espnEventId   String   @unique // ESPN's event ID for reliable matching
+  seasonYear    Int
+  weekNumber    Int
+
+  // Team references
+  homeTeamId    Int
+  awayTeamId    Int
+
+  // Game timing
+  startTime     DateTime
+  status        GameStatus @default(SCHEDULED)
+
+  // Scores (null until game starts)
+  homeScore     Int?
+  awayScore     Int?
+
+  // Winner (null until game is final)
+  winnerTeamId  Int?
+
+  // Odds/upset detection
+  spread            Float?   // Home team spread (negative = home favored)
+  homeMoneyline     Int?     // American odds for home team (e.g., -150, +120)
+  awayMoneyline     Int?     // American odds for away team
+  favoriteTeamId    Int?     // Which team was favored
+  bookmaker         String?  // e.g., "DraftKings", "FanDuel"
+  oddsTimestamp     DateTime? // When odds were fetched
+  wasUpset          Boolean  @default(false) // Set when game is final
+
+  // Metadata
+  venue         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  homeTeam     Team  @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam     Team  @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  winnerTeam   Team? @relation("WinnerTeam", fields: [winnerTeamId], references: [id])
+  favoriteTeam Team? @relation("FavoriteTeam", fields: [favoriteTeamId], references: [id])
+
+  @@index([seasonYear, weekNumber])
+  @@index([startTime])
+  @@index([status])
+}
+
+enum GameStatus {
+  SCHEDULED
+  IN_PROGRESS
+  FINAL
+  POSTPONED
+  CANCELLED
+}
+
+// Roster ownership tracking - who owns which team in each league
+model RosterTeam {
+  id          Int      @id @default(autoincrement())
+  leagueId    Int
+  userId      Int
+  teamId      Int
+
+  // How the team was acquired
+  acquiredVia AcquisitionType
+  acquiredAt  DateTime @default(now())
+
+  // Null if still on roster, set when dropped
+  droppedAt   DateTime?
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  // A team can only be on one active roster per league
+  @@unique([leagueId, teamId, droppedAt])
+  @@index([leagueId, userId])
+  @@index([leagueId, teamId])
+}
+
+enum AcquisitionType {
+  DRAFT
+  WAIVER
+  FREE_AGENT
+  AUCTION
+}
+
+// Waiver claims for roster management
+model WaiverClaim {
+  id          Int      @id @default(autoincrement())
+  leagueId    Int
+  userId      Int
+
+  // Team to add
+  addTeamId   Int
+  // Team to drop (required since rosters are fixed at 6)
+  dropTeamId  Int
+
+  status      WaiverStatus @default(PENDING)
+  priority    Int          // Lower = higher priority (based on standings)
+
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+
+  // Reason for rejection (if applicable)
+  rejectionReason String?
+
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([leagueId, status])
+  @@index([leagueId, userId])
+}
+
+enum WaiverStatus {
+  PENDING
+  WON
+  LOST
+  CANCELLED
+}
+
+// ============================================
+// FAAB AUCTION MODELS
+// ============================================
+
+// Auction event for a league (one midseason auction window)
+model AuctionEvent {
+  id        Int      @id @default(autoincrement())
+  leagueId  Int      @unique // One auction event per league
+
+  // Auction timing
+  weekNumber Int               // Which week this auction is for
+  opensAt    DateTime          // When bidding opens (UTC)
+  closesAt   DateTime          // When bidding closes (UTC)
+
+  // Auction status
+  status     AuctionEventStatus @default(SCHEDULED)
+
+  // Metadata
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  league League       @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  bids   AuctionBid[]
+
+  @@index([status])
+  @@index([closesAt])
+}
+
+enum AuctionEventStatus {
+  SCHEDULED   // Not yet open
+  OPEN        // Bidding is active
+  FINALIZING  // Auction closed, processing bids
+  COMPLETE    // All bids processed, rosters updated
+}
+
+// Individual auction bid
+model AuctionBid {
+  id             Int      @id @default(autoincrement())
+  auctionEventId Int
+  leagueId       Int
+  memberId       Int      // LeagueMember.id (not userId directly)
+
+  // Bid details
+  addTeamId      Int      // Team being bid on
+  dropTeamId     Int      // Team to drop if bid wins
+  amount         Int      // FAAB amount bid
+
+  // Bid status
+  status         AuctionBidStatus @default(ACTIVE)
+
+  // Metadata
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  auctionEvent AuctionEvent @relation(fields: [auctionEventId], references: [id], onDelete: Cascade)
+  member       LeagueMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  // User can only have one ACTIVE bid per team per auction
+  @@unique([auctionEventId, memberId, addTeamId, status])
+  @@index([auctionEventId, addTeamId])
+  @@index([auctionEventId, memberId])
+  @@index([status])
+}
+
+enum AuctionBidStatus {
+  ACTIVE     // Bid is live
+  OUTBID     // Someone placed a higher bid (if we allow increasing bids)
+  WON        // Bid won the auction
+  LOST       // Bid lost to higher bidder
+  CANCELLED  // User cancelled the bid
 }

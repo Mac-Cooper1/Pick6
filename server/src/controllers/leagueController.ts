@@ -1,11 +1,10 @@
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { AuthRequest, CreateLeagueRequest, JoinLeagueRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { generateJoinCode, validateJoinCode } from '../utils/joinCode';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
+import { MemberRole, DraftStatus } from '@prisma/client';
 
 /**
  * Create a new league
@@ -66,21 +65,23 @@ export async function createLeague(req: AuthRequest, res: Response, next: any) {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create league
+    // Create league with commissioner
     const league = await prisma.league.create({
       data: {
         name,
         joinCode,
         password: hashedPassword,
         maxPlayers,
+        commissionerUserId: userId,
       },
     });
 
-    // Add creator as first member
+    // Add creator as first member (commissioner)
     await prisma.leagueMember.create({
       data: {
         leagueId: league.id,
         userId,
+        role: MemberRole.COMMISSIONER,
       },
     });
 
@@ -278,6 +279,171 @@ export async function getLeagueMembers(req: AuthRequest, res: Response, next: an
     }));
 
     res.json(response);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Get all leagues for the current user
+ * GET /api/leagues/my
+ */
+export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
+  try {
+    const userId = req.userId!;
+
+    // Get all leagues the user is a member of
+    const memberships = await prisma.leagueMember.findMany({
+      where: { userId },
+      include: {
+        league: {
+          include: {
+            members: {
+              include: {
+                user: true,
+              },
+            },
+            weeklyScores: {
+              where: { userId },
+              orderBy: { weekNumber: 'desc' },
+            },
+          },
+        },
+      },
+      orderBy: {
+        joinedAt: 'desc',
+      },
+    });
+
+    const leagues = await Promise.all(
+      memberships.map(async (membership) => {
+        const league = membership.league;
+
+        // Calculate user's record (wins/losses based on weekly standings)
+        const totalPoints = league.weeklyScores.reduce((sum, score) => sum + score.points, 0);
+
+        // Get user's rank in the league
+        const allScores = await prisma.weeklyScore.groupBy({
+          by: ['userId'],
+          where: { leagueId: league.id },
+          _sum: { points: true },
+          orderBy: { _sum: { points: 'desc' } },
+        });
+
+        const userRank = allScores.findIndex((s) => s.userId === userId) + 1;
+
+        return {
+          id: league.id,
+          name: league.name,
+          joinCode: league.joinCode,
+          memberCount: league.members.length,
+          maxPlayers: league.maxPlayers,
+          seasonYear: league.seasonYear,
+          currentWeek: league.currentWeek,
+          draftStatus: league.draftStatus,
+          draftScheduledAt: league.draftScheduledAt,
+          draftComplete: league.draftComplete,
+          isCommissioner: membership.role === MemberRole.COMMISSIONER,
+          userStats: {
+            totalPoints,
+            rank: userRank || null,
+            totalMembers: allScores.length,
+          },
+          members: league.members.map((m) => ({
+            id: m.user.id,
+            name: m.user.name,
+            role: m.role,
+          })),
+        };
+      })
+    );
+
+    res.json(leagues);
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Update league settings (commissioner only)
+ * PATCH /api/leagues/:leagueId/settings
+ */
+export async function updateLeagueSettings(req: AuthRequest, res: Response, next: any) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+    const { draftScheduledAt, pickDeadlineSeconds, draftType } = req.body;
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    // Check if user is commissioner
+    const membership = await prisma.leagueMember.findUnique({
+      where: { leagueId_userId: { leagueId, userId } },
+    });
+
+    if (!membership || membership.role !== MemberRole.COMMISSIONER) {
+      throw new AppError('Only the commissioner can update league settings', 403);
+    }
+
+    // Get current league state
+    const league = await prisma.league.findUnique({
+      where: { id: leagueId },
+    });
+
+    if (!league) {
+      throw new AppError('League not found', 404);
+    }
+
+    if (league.draftStarted) {
+      throw new AppError('Cannot modify draft settings after draft has started', 400);
+    }
+
+    // Build update data
+    const updateData: any = {};
+
+    if (draftScheduledAt !== undefined) {
+      if (draftScheduledAt === null) {
+        updateData.draftScheduledAt = null;
+        updateData.draftStatus = DraftStatus.NOT_STARTED;
+      } else {
+        const scheduledDate = new Date(draftScheduledAt);
+        if (scheduledDate <= new Date()) {
+          throw new AppError('Draft must be scheduled in the future', 400);
+        }
+        updateData.draftScheduledAt = scheduledDate;
+        updateData.draftStatus = DraftStatus.SCHEDULED;
+      }
+    }
+
+    if (pickDeadlineSeconds !== undefined) {
+      if (pickDeadlineSeconds < 30 || pickDeadlineSeconds > 300) {
+        throw new AppError('Pick deadline must be between 30 and 300 seconds', 400);
+      }
+      updateData.pickDeadlineSeconds = pickDeadlineSeconds;
+    }
+
+    if (draftType !== undefined) {
+      if (!['SNAKE', 'LINEAR'].includes(draftType)) {
+        throw new AppError('Invalid draft type', 400);
+      }
+      updateData.draftType = draftType;
+    }
+
+    const updatedLeague = await prisma.league.update({
+      where: { id: leagueId },
+      data: updateData,
+    });
+
+    res.json({
+      id: updatedLeague.id,
+      name: updatedLeague.name,
+      draftType: updatedLeague.draftType,
+      draftScheduledAt: updatedLeague.draftScheduledAt,
+      draftStatus: updatedLeague.draftStatus,
+      pickDeadlineSeconds: updatedLeague.pickDeadlineSeconds,
+    });
   } catch (error) {
     next(error);
   }

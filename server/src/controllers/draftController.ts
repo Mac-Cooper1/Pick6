@@ -1,10 +1,19 @@
 import { Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { AuthRequest, DraftPickRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-import { getRoundNumber } from '../utils/draft';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
+import {
+  startDraft,
+  getDraftState,
+  makePick,
+  processAutoPick,
+  getDraftQueue,
+  setDraftQueue,
+  addToQueue,
+  removeFromQueue,
+  reorderQueue,
+  getRoundNumber,
+} from '../services/draftService';
 
 /**
  * Get all available teams
@@ -74,6 +83,7 @@ export async function getDraftPicks(req: AuthRequest, res: Response) {
         name: pick.team.name,
         conference: pick.team.conference,
       },
+      wasAutoPick: pick.wasAutoPick,
     }));
 
     res.json(response);
@@ -83,7 +93,7 @@ export async function getDraftPicks(req: AuthRequest, res: Response) {
 }
 
 /**
- * Draft a team
+ * Draft a team (legacy endpoint, kept for backwards compatibility)
  * POST /api/draft/:leagueId/pick
  * Body: { teamId }
  */
@@ -115,97 +125,14 @@ export async function draftTeam(req: AuthRequest, res: Response) {
       throw new AppError('Not a member of this league', 403);
     }
 
-    // Check if team exists
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-    });
+    // Use the new draft service
+    const result = await makePick(leagueId, userId, teamId);
 
-    if (!team) {
-      throw new AppError('Team not found', 404);
+    res.status(201).json(result);
+  } catch (error: any) {
+    if (error.message) {
+      throw new AppError(error.message, 400);
     }
-
-    // Check if team is already drafted in this league
-    const existingPick = await prisma.draftPick.findUnique({
-      where: {
-        leagueId_teamId: {
-          leagueId,
-          teamId,
-        },
-      },
-    });
-
-    if (existingPick) {
-      throw new AppError('Team already drafted', 400);
-    }
-
-    // Check if user has already drafted 6 teams
-    const userPicks = await prisma.draftPick.count({
-      where: {
-        leagueId,
-        userId,
-      },
-    });
-
-    if (userPicks >= 6) {
-      throw new AppError('You have already drafted 6 teams', 400);
-    }
-
-    // Get league members count
-    const memberCount = await prisma.leagueMember.count({
-      where: { leagueId },
-    });
-
-    // Calculate pick number
-    const currentPicks = await prisma.draftPick.count({
-      where: { leagueId },
-    });
-    const pickNumber = currentPicks + 1;
-
-    // Calculate round
-    const round = getRoundNumber(pickNumber, memberCount);
-
-    // Create draft pick
-    const draftPick = await prisma.draftPick.create({
-      data: {
-        leagueId,
-        userId,
-        teamId,
-        pickNumber,
-        round,
-      },
-      include: {
-        team: true,
-        user: true,
-      },
-    });
-
-    // Check if draft is complete (all members have 6 teams)
-    const totalPicks = await prisma.draftPick.count({
-      where: { leagueId },
-    });
-
-    if (totalPicks === memberCount * 6) {
-      await prisma.league.update({
-        where: { id: leagueId },
-        data: { draftComplete: true },
-      });
-    }
-
-    res.status(201).json({
-      id: draftPick.id,
-      pickNumber: draftPick.pickNumber,
-      round: draftPick.round,
-      user: {
-        id: draftPick.user.id,
-        name: draftPick.user.name,
-      },
-      team: {
-        id: draftPick.team.id,
-        name: draftPick.team.name,
-        conference: draftPick.team.conference,
-      },
-    });
-  } catch (error) {
     throw error;
   }
 }
@@ -256,6 +183,209 @@ export async function getAvailableTeams(req: AuthRequest, res: Response) {
     });
 
     res.json(availableTeams);
+  } catch (error) {
+    throw error;
+  }
+}
+
+// ============= New Enhanced Draft Endpoints =============
+
+/**
+ * Start the draft for a league
+ * POST /api/draft/:leagueId/start
+ */
+export async function startDraftEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    // Verify user is a member (ideally should be league creator/admin)
+    const member = await prisma.leagueMember.findUnique({
+      where: { leagueId_userId: { leagueId, userId } },
+    });
+
+    if (!member) {
+      throw new AppError('Not a member of this league', 403);
+    }
+
+    const result = await startDraft(leagueId);
+    res.json(result);
+  } catch (error: any) {
+    if (error.message) {
+      throw new AppError(error.message, 400);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get current draft state
+ * GET /api/draft/:leagueId/state
+ */
+export async function getDraftStateEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    // Verify user is a member
+    const member = await prisma.leagueMember.findUnique({
+      where: { leagueId_userId: { leagueId, userId } },
+    });
+
+    if (!member) {
+      throw new AppError('Not a member of this league', 403);
+    }
+
+    const state = await getDraftState(leagueId);
+    res.json(state);
+  } catch (error: any) {
+    if (error.message) {
+      throw new AppError(error.message, 400);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Trigger autopick (for admin/scheduled job)
+ * POST /api/draft/:leagueId/autopick
+ */
+export async function triggerAutopick(req: AuthRequest, res: Response) {
+  try {
+    const leagueId = parseInt(req.params.leagueId);
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    const result = await processAutoPick(leagueId);
+
+    if (!result) {
+      res.json({ message: 'No autopick needed', executed: false });
+    } else {
+      res.json({ ...result, executed: true });
+    }
+  } catch (error: any) {
+    if (error.message) {
+      throw new AppError(error.message, 400);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get user's draft queue
+ * GET /api/draft/:leagueId/queue
+ */
+export async function getQueueEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    const queue = await getDraftQueue(leagueId, userId);
+
+    res.json(
+      queue.map((q) => ({
+        teamId: q.teamId,
+        teamName: q.team.name,
+        conference: q.team.conference,
+        priority: q.priority,
+      }))
+    );
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Set user's draft queue
+ * PUT /api/draft/:leagueId/queue
+ * Body: { teamIds: number[] }
+ */
+export async function setQueueEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+    const { teamIds } = req.body;
+
+    if (isNaN(leagueId)) {
+      throw new AppError('Invalid league ID', 400);
+    }
+
+    if (!Array.isArray(teamIds)) {
+      throw new AppError('teamIds must be an array', 400);
+    }
+
+    const queue = await setDraftQueue(leagueId, userId, teamIds);
+
+    res.json(
+      queue.map((q) => ({
+        teamId: q.teamId,
+        teamName: q.team.name,
+        conference: q.team.conference,
+        priority: q.priority,
+      }))
+    );
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Add team to queue
+ * POST /api/draft/:leagueId/queue/:teamId
+ */
+export async function addToQueueEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+    const teamId = parseInt(req.params.teamId);
+
+    if (isNaN(leagueId) || isNaN(teamId)) {
+      throw new AppError('Invalid league ID or team ID', 400);
+    }
+
+    const item = await addToQueue(leagueId, userId, teamId);
+
+    res.json({
+      teamId: item.teamId,
+      teamName: item.team.name,
+      priority: item.priority,
+    });
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Remove team from queue
+ * DELETE /api/draft/:leagueId/queue/:teamId
+ */
+export async function removeFromQueueEndpoint(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.userId!;
+    const leagueId = parseInt(req.params.leagueId);
+    const teamId = parseInt(req.params.teamId);
+
+    if (isNaN(leagueId) || isNaN(teamId)) {
+      throw new AppError('Invalid league ID or team ID', 400);
+    }
+
+    await removeFromQueue(leagueId, userId, teamId);
+
+    res.json({ success: true });
   } catch (error) {
     throw error;
   }

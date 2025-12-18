@@ -1,0 +1,2 @@
+-- AddForeignKey
+ALTER TABLE "DraftQueue" ADD CONSTRAINT "DraftQueue_teamId_fkey" FOREIGN KEY ("teamId") REFERENCES "Team"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

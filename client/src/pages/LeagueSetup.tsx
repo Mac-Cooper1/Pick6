@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { leagueApi, authApi } from '../services/api';
+import { leagueApi } from '../services/api';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { ErrorMessage } from '../components/ErrorMessage';
-import { League } from '../types';
 
-type FlowMode = 'select' | 'create' | 'join' | 'myLeagues';
+type FlowMode = 'select' | 'create' | 'join';
 
-export function LeagueSetup() {
+interface LeagueSetupProps {
+  mode?: 'create' | 'join';
+}
+
+export function LeagueSetup({ mode }: LeagueSetupProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [flowMode, setFlowMode] = useState<FlowMode>('select');
+  const [flowMode, setFlowMode] = useState<FlowMode>(mode || 'select');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [myLeagues, setMyLeagues] = useState<any[]>([]);
 
   // Create league state
   const [leagueName, setLeagueName] = useState('');
@@ -28,24 +30,12 @@ export function LeagueSetup() {
   const [joinCode, setJoinCode] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
 
-  // Fetch user's leagues on mount
+  // Update flow mode when prop changes
   useEffect(() => {
-    const fetchUserLeagues = async () => {
-      try {
-        const currentUser = await authApi.getCurrentUser();
-        // TODO: Implement leagues fetching when backend endpoint is ready
-        // if (currentUser.leagues && currentUser.leagues.length > 0) {
-        //   setMyLeagues(currentUser.leagues);
-        //   setFlowMode('myLeagues');
-        // }
-        console.log('Current user:', currentUser);
-      } catch (err) {
-        console.error('Failed to fetch leagues:', err);
-      }
-    };
-
-    fetchUserLeagues();
-  }, []);
+    if (mode) {
+      setFlowMode(mode);
+    }
+  }, [mode]);
 
   const handleCreateLeague = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +56,7 @@ export function LeagueSetup() {
         customJoinCode: customJoinCode || undefined,
       });
 
-      navigate(`/app/${league.id}`);
+      navigate(`/league/${league.id}`);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to create league');
     } finally {
@@ -91,7 +81,7 @@ export function LeagueSetup() {
         password: joinPassword,
       });
 
-      navigate(`/app/${league.id}`);
+      navigate(`/league/${league.id}`);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to join league');
     } finally {
@@ -110,34 +100,6 @@ export function LeagueSetup() {
         {error && (
           <div className="mb-4">
             <ErrorMessage message={error} />
-          </div>
-        )}
-
-        {flowMode === 'myLeagues' && (
-          <div className="space-y-4">
-            <h3 className="text-xl font-semibold mb-4">My Leagues</h3>
-
-            <div className="space-y-2 mb-4">
-              {myLeagues.map((league) => (
-                <button
-                  key={league.id}
-                  onClick={() => navigate(`/app/${league.id}`)}
-                  className="w-full p-4 text-left bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg transition-colors"
-                >
-                  <div className="font-semibold text-green-900">{league.name}</div>
-                  <div className="text-sm text-gray-600">Code: {league.joinCode}</div>
-                </button>
-              ))}
-            </div>
-
-            <div className="border-t pt-4 space-y-2">
-              <Button fullWidth onClick={() => setFlowMode('create')}>
-                Create New League
-              </Button>
-              <Button fullWidth variant="secondary" onClick={() => setFlowMode('join')}>
-                Join Another League
-              </Button>
-            </div>
           </div>
         )}
 
@@ -207,7 +169,7 @@ export function LeagueSetup() {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => setFlowMode('select')}
+                onClick={() => navigate('/dashboard')}
               >
                 Back
               </Button>
@@ -245,7 +207,7 @@ export function LeagueSetup() {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => setFlowMode('select')}
+                onClick={() => navigate('/dashboard')}
               >
                 Back
               </Button>

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Landing } from './pages/Landing';
+import { Dashboard } from './pages/Dashboard';
 import { LeagueSetup } from './pages/LeagueSetup';
 import { MainApp } from './pages/MainApp';
 
@@ -25,6 +26,33 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Landing />} />
+            {/* Dashboard - My Leagues */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            {/* Create/Join League */}
+            <Route
+              path="/league/create"
+              element={
+                <ProtectedRoute>
+                  <LeagueSetup mode="create" />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/league/join"
+              element={
+                <ProtectedRoute>
+                  <LeagueSetup mode="join" />
+                </ProtectedRoute>
+              }
+            />
+            {/* Legacy route */}
             <Route
               path="/league-setup"
               element={
@@ -33,6 +61,16 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            {/* League detail */}
+            <Route
+              path="/league/:leagueId"
+              element={
+                <ProtectedRoute>
+                  <MainApp />
+                </ProtectedRoute>
+              }
+            />
+            {/* Legacy route */}
             <Route
               path="/app/:leagueId"
               element={
