@@ -5,11 +5,11 @@
  */
 
 import { io, Socket } from 'socket.io-client';
+import type { ConferenceSlot } from '../types';
 
 // Socket URL - in dev use relative path for proxy, in prod use API URL
-const SOCKET_URL = import.meta.env.PROD
-  ? (import.meta.env.VITE_API_URL || 'http://localhost:3001')
-  : '';
+// (api.ts already throws at load time if VITE_API_URL is missing in prod)
+const SOCKET_URL = import.meta.env.PROD ? (import.meta.env.VITE_API_URL || '') : '';
 
 // Draft state types
 export interface DraftPick {
@@ -19,6 +19,7 @@ export interface DraftPick {
   userName: string;
   teamId: number;
   teamName: string;
+  teamSlot: ConferenceSlot;
   wasAutoPick: boolean;
 }
 
@@ -26,6 +27,7 @@ export interface DraftMember {
   userId: number;
   name: string;
   draftPosition: number | null;
+  filledSlots: ConferenceSlot[];
 }
 
 export interface DraftState {
@@ -34,9 +36,10 @@ export interface DraftState {
   draftComplete: boolean;
   draftStatus: 'NOT_STARTED' | 'SCHEDULED' | 'LIVE' | 'PAUSED' | 'COMPLETE';
   draftScheduledAt: string | null;
-  draftType: 'SNAKE' | 'LINEAR';
   currentPickNumber: number;
   totalPicks: number;
+  rounds: number;
+  slots: ConferenceSlot[];
   currentRound: number;
   onTheClockUserId: number | null;
   pickDeadline: string | null;
@@ -105,7 +108,6 @@ export function connectToDraft(
 
   // Connection handlers
   socket.on('connect', () => {
-    console.log('[Socket] Connected to server');
     handlers.onConnect?.();
 
     // Join the draft room
@@ -113,7 +115,6 @@ export function connectToDraft(
   });
 
   socket.on('disconnect', (reason) => {
-    console.log('[Socket] Disconnected:', reason);
     handlers.onDisconnect?.();
   });
 

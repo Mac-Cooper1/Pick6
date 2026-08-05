@@ -1,40 +1,47 @@
 import { Router } from 'express';
 import {
-  enterGameResult,
-  calculateWeeklyScores,
-  getGameResults,
+  syncCurrentEndpoint,
+  syncCalendarEndpoint,
+  resetPasswordEndpoint,
   syncWeekEndpoint,
   syncGamesEndpoint,
   syncOddsEndpoint,
   finalizeGamesEndpoint,
+  gameOverrideEndpoint,
   previewEspnGames,
   previewCurrentOdds,
   getGames,
   syncAllLeaguesEndpoint,
 } from '../controllers/adminController';
-import { authenticate } from '../middleware/auth';
+import { requireAdmin } from '../middleware/adminAuth';
 import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
 
-// For MVP, these routes are protected but don't check for admin role
-// In production, you would add an admin check middleware
+// Every admin route requires either the ADMIN_SECRET header (scheduled jobs)
+// or a JWT belonging to a league commissioner (in-app controls).
+router.use(asyncHandler(requireAdmin));
 
-// Legacy manual entry endpoints (kept for backwards compatibility)
-router.post('/game-result', authenticate, asyncHandler(enterGameResult));
-router.post('/calculate-scores/:leagueId/:weekNumber', authenticate, asyncHandler(calculateWeeklyScores));
-router.get('/game-results/:weekNumber', authenticate, asyncHandler(getGameResults));
+// The scheduled-sync entry point (GitHub Actions hits this)
+router.post('/sync-current', asyncHandler(syncCurrentEndpoint));
 
-// Automated sync endpoints
-router.post('/sync-week/:leagueId/:weekNumber', authenticate, asyncHandler(syncWeekEndpoint));
-router.post('/sync-games/:seasonYear/:weekNumber', authenticate, asyncHandler(syncGamesEndpoint));
-router.post('/sync-odds', authenticate, asyncHandler(syncOddsEndpoint));
-router.post('/finalize-games/:seasonYear/:weekNumber', authenticate, asyncHandler(finalizeGamesEndpoint));
-router.post('/sync-all-leagues/:seasonYear/:weekNumber', authenticate, asyncHandler(syncAllLeaguesEndpoint));
+// Season calendar (D6)
+router.post('/sync-calendar/:seasonYear', asyncHandler(syncCalendarEndpoint));
+
+// Granular sync endpoints (manual/diagnostic)
+router.post('/sync-week/:leagueId/:weekNumber', asyncHandler(syncWeekEndpoint));
+router.post('/sync-games/:seasonYear/:weekNumber', asyncHandler(syncGamesEndpoint));
+router.post('/sync-odds', asyncHandler(syncOddsEndpoint));
+router.post('/finalize-games/:seasonYear/:weekNumber', asyncHandler(finalizeGamesEndpoint));
+router.post('/sync-all-leagues/:seasonYear/:weekNumber', asyncHandler(syncAllLeaguesEndpoint));
+
+// Commissioner escape hatches
+router.post('/game-override', asyncHandler(gameOverrideEndpoint));
+router.post('/reset-password', asyncHandler(resetPasswordEndpoint));
 
 // Preview endpoints (read-only)
-router.get('/espn-games/:seasonYear/:weekNumber', authenticate, asyncHandler(previewEspnGames));
-router.get('/current-odds', authenticate, asyncHandler(previewCurrentOdds));
-router.get('/games/:seasonYear/:weekNumber', authenticate, asyncHandler(getGames));
+router.get('/espn-games/:seasonYear/:weekNumber', asyncHandler(previewEspnGames));
+router.get('/current-odds', asyncHandler(previewCurrentOdds));
+router.get('/games/:seasonYear/:weekNumber', asyncHandler(getGames));
 
 export default router;

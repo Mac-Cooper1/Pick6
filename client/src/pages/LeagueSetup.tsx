@@ -23,12 +23,10 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
   // Create league state
   const [leagueName, setLeagueName] = useState('');
   const [maxPlayers, setMaxPlayers] = useState(10);
-  const [password, setPassword] = useState('');
   const [customJoinCode, setCustomJoinCode] = useState('');
 
   // Join league state
   const [joinCode, setJoinCode] = useState('');
-  const [joinPassword, setJoinPassword] = useState('');
 
   // Update flow mode when prop changes
   useEffect(() => {
@@ -41,8 +39,8 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
     e.preventDefault();
     setError('');
 
-    if (!leagueName || !password) {
-      setError('League name and password are required');
+    if (!leagueName) {
+      setError('League name is required');
       return;
     }
 
@@ -52,7 +50,6 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
       const league = await leagueApi.createLeague({
         name: leagueName,
         maxPlayers,
-        password,
         customJoinCode: customJoinCode || undefined,
       });
 
@@ -68,8 +65,8 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
     e.preventDefault();
     setError('');
 
-    if (!joinCode || !joinPassword) {
-      setError('Join code and password are required');
+    if (!joinCode) {
+      setError('Join code is required');
       return;
     }
 
@@ -78,7 +75,6 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
     try {
       const league = await leagueApi.joinLeague({
         joinCode,
-        password: joinPassword,
       });
 
       navigate(`/league/${league.id}`);
@@ -153,15 +149,6 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
               maxLength={6}
             />
 
-            <Input
-              type="password"
-              placeholder="League Password"
-              label="League Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-
             <div className="flex gap-2">
               <Button type="submit" fullWidth disabled={isLoading}>
                 {isLoading ? 'Creating...' : 'Create League'}
@@ -188,15 +175,6 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               maxLength={6}
-              required
-            />
-
-            <Input
-              type="password"
-              placeholder="League Password"
-              label="League Password"
-              value={joinPassword}
-              onChange={(e) => setJoinPassword(e.target.value)}
               required
             />
 

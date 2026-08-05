@@ -7,7 +7,6 @@ import { errorHandler } from './middleware/errorHandler';
 import { validateEnv } from './lib/env';
 import { testDatabaseConnection, disconnectPrisma } from './lib/prisma';
 import { initDraftSocket, setIOInstance } from './socket/draftSocket';
-import { initAuctionSocket } from './socket/auctionSocket';
 
 // Load environment variables FIRST
 dotenv.config();
@@ -24,29 +23,27 @@ import adminRoutes from './routes/admin';
 import rosterRoutes from './routes/rosters';
 import cfbRoutes from './routes/cfb';
 import oddsRoutes from './routes/odds';
-import auctionRoutes from './routes/auction';
 
 const app: Application = express();
 const httpServer = createServer(app);
 const PORT = envConfig.PORT;
 
-// Socket.IO setup with CORS
+// Socket.IO setup with CORS. Auth is Bearer-token based (no cookies), so
+// credentials are never needed — which keeps origin '*' legal in dev while
+// production pins the exact client origin.
 const io = new Server(httpServer, {
   cors: {
     origin: envConfig.CORS_ORIGIN === '*' ? true : envConfig.CORS_ORIGIN,
-    credentials: true,
   },
 });
 
 // Initialize socket handlers and store IO instance
 initDraftSocket(io);
-initAuctionSocket(io);
 setIOInstance(io);
 
-// CORS configuration
+// CORS configuration (Bearer-token auth — no cookies, no credentials flag)
 const corsOptions = {
   origin: envConfig.CORS_ORIGIN,
-  credentials: true,
 };
 
 // Middleware
@@ -68,7 +65,6 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/rosters', rosterRoutes);
 app.use('/api/cfb', cfbRoutes);
 app.use('/api/odds', oddsRoutes);
-app.use('/api/auction', auctionRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -92,7 +88,7 @@ async function startServer() {
       console.log(`🏈 Pick 6 server running on port ${PORT}`);
       console.log(`📍 Health check: http://localhost:${PORT}/health`);
       console.log(`🔗 API base: http://localhost:${PORT}/api`);
-      console.log(`🔌 Socket.IO enabled for live draft and auction`);
+      console.log(`🔌 Socket.IO enabled for live draft`);
     });
   } catch (error: any) {
     console.error('\n❌ Server startup failed:');
@@ -116,10 +112,10 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-// Handle unhandled promise rejections
+// Log unhandled promise rejections without dying — a single failed detached
+// fetch (ESPN hiccup, odds timeout) must not take the whole server down
 process.on('unhandledRejection', (err: Error) => {
   console.error('Unhandled Promise Rejection:', err);
-  process.exit(1);
 });
 
 // Start the server

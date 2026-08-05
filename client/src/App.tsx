@@ -52,27 +52,9 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            {/* Legacy route */}
-            <Route
-              path="/league-setup"
-              element={
-                <ProtectedRoute>
-                  <LeagueSetup />
-                </ProtectedRoute>
-              }
-            />
             {/* League detail */}
             <Route
               path="/league/:leagueId"
-              element={
-                <ProtectedRoute>
-                  <MainApp />
-                </ProtectedRoute>
-              }
-            />
-            {/* Legacy route */}
-            <Route
-              path="/app/:leagueId"
               element={
                 <ProtectedRoute>
                   <MainApp />

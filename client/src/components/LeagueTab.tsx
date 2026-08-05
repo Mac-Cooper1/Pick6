@@ -124,7 +124,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                 <h3 className="text-xl font-bold text-gray-800">
                   {idx + 1}. {member.name}
                 </h3>
-                <span className="text-sm text-gray-500">{member.teams.length}/6 teams</span>
+                <span className="text-sm text-gray-500">{member.teams.length}/5 teams</span>
               </div>
 
               {member.teams.length > 0 ? (

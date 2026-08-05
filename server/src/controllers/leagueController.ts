@@ -1,24 +1,24 @@
 import { Response } from 'express';
-import bcrypt from 'bcrypt';
 import { AuthRequest, CreateLeagueRequest, JoinLeagueRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { generateJoinCode, validateJoinCode } from '../utils/joinCode';
+import { getCurrentWeek } from '../services/seasonService';
 import prisma from '../lib/prisma';
 import { MemberRole, DraftStatus } from '@prisma/client';
 
 /**
  * Create a new league
  * POST /api/leagues/create
- * Body: { name, maxPlayers, password, customJoinCode? }
+ * Body: { name, maxPlayers, customJoinCode? }
  */
 export async function createLeague(req: AuthRequest, res: Response, next: any) {
   try {
     const userId = req.userId!;
-    const { name, maxPlayers, password, customJoinCode }: CreateLeagueRequest = req.body;
+    const { name, maxPlayers, customJoinCode }: CreateLeagueRequest = req.body;
 
     // Validation
-    if (!name || !password || !maxPlayers) {
-      throw new AppError('Name, password, and maxPlayers are required', 400);
+    if (!name || !maxPlayers) {
+      throw new AppError('Name and maxPlayers are required', 400);
     }
 
     if (name.length < 1 || name.length > 50) {
@@ -62,15 +62,11 @@ export async function createLeague(req: AuthRequest, res: Response, next: any) {
       }
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
     // Create league with commissioner
     const league = await prisma.league.create({
       data: {
         name,
         joinCode,
-        password: hashedPassword,
         maxPlayers,
         commissionerUserId: userId,
       },
@@ -100,15 +96,15 @@ export async function createLeague(req: AuthRequest, res: Response, next: any) {
 /**
  * Join an existing league
  * POST /api/leagues/join
- * Body: { joinCode, password }
+ * Body: { joinCode }
  */
 export async function joinLeague(req: AuthRequest, res: Response, next: any) {
   try {
     const userId = req.userId!;
-    const { joinCode, password }: JoinLeagueRequest = req.body;
+    const { joinCode }: JoinLeagueRequest = req.body;
 
-    if (!joinCode || !password) {
-      throw new AppError('Join code and password are required', 400);
+    if (!joinCode) {
+      throw new AppError('Join code is required', 400);
     }
 
     const normalizedCode = joinCode.toUpperCase();
@@ -123,12 +119,6 @@ export async function joinLeague(req: AuthRequest, res: Response, next: any) {
 
     if (!league) {
       throw new AppError('League not found', 404);
-    }
-
-    // Check password
-    const passwordMatch = await bcrypt.compare(password, league.password);
-    if (!passwordMatch) {
-      throw new AppError('Incorrect password', 401);
     }
 
     // Check if league is full
@@ -273,6 +263,7 @@ export async function getLeagueMembers(req: AuthRequest, res: Response, next: an
         id: pick.team.id,
         name: pick.team.name,
         conference: pick.team.conference,
+        slot: pick.team.slot,
         pickNumber: pick.pickNumber,
         round: pick.round,
       })),
@@ -315,6 +306,13 @@ export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
       },
     });
 
+    // Derived current week per season (one lookup per distinct season year)
+    const seasonYears = [...new Set(memberships.map((m) => m.league.seasonYear))];
+    const weekBySeason = new Map<number, number>();
+    for (const year of seasonYears) {
+      weekBySeason.set(year, await getCurrentWeek(year));
+    }
+
     const leagues = await Promise.all(
       memberships.map(async (membership) => {
         const league = membership.league;
@@ -339,7 +337,7 @@ export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
           memberCount: league.members.length,
           maxPlayers: league.maxPlayers,
           seasonYear: league.seasonYear,
-          currentWeek: league.currentWeek,
+          currentWeek: weekBySeason.get(league.seasonYear) ?? 1,
           draftStatus: league.draftStatus,
           draftScheduledAt: league.draftScheduledAt,
           draftComplete: league.draftComplete,
@@ -372,7 +370,7 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
   try {
     const userId = req.userId!;
     const leagueId = parseInt(req.params.leagueId);
-    const { draftScheduledAt, pickDeadlineSeconds, draftType } = req.body;
+    const { draftScheduledAt, pickDeadlineSeconds } = req.body;
 
     if (isNaN(leagueId)) {
       throw new AppError('Invalid league ID', 400);
@@ -424,13 +422,6 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
       updateData.pickDeadlineSeconds = pickDeadlineSeconds;
     }
 
-    if (draftType !== undefined) {
-      if (!['SNAKE', 'LINEAR'].includes(draftType)) {
-        throw new AppError('Invalid draft type', 400);
-      }
-      updateData.draftType = draftType;
-    }
-
     const updatedLeague = await prisma.league.update({
       where: { id: leagueId },
       data: updateData,
@@ -439,7 +430,6 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
     res.json({
       id: updatedLeague.id,
       name: updatedLeague.name,
-      draftType: updatedLeague.draftType,
       draftScheduledAt: updatedLeague.draftScheduledAt,
       draftStatus: updatedLeague.draftStatus,
       pickDeadlineSeconds: updatedLeague.pickDeadlineSeconds,

@@ -12,6 +12,7 @@ export function Landing() {
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -19,32 +20,35 @@ export function Landing() {
     e.preventDefault();
     setError('');
 
-    if (!email) {
-      setError('Email is required');
+    if (!email || !password) {
+      setError('Email and password are required');
       return;
     }
 
-    if (authMode === 'signup' && !name) {
-      setError('Name is required');
-      return;
+    if (authMode === 'signup') {
+      if (!name) {
+        setError('Name is required');
+        return;
+      }
+      if (password.length < 8) {
+        setError('Password must be at least 8 characters');
+        return;
+      }
     }
 
     setIsLoading(true);
 
     try {
       if (authMode === 'signup') {
-        // Register new user
-        await register(name, email);
+        await register(name, email, password);
         navigate('/dashboard');
       } else {
-        // Try to login existing user
         try {
-          await login(email);
+          await login(email, password);
           navigate('/dashboard');
         } catch (err: any) {
-          // If user not found, show helpful error
-          if (err.response?.status === 404) {
-            setError('No account found with this email. Please sign up first.');
+          if (err.response?.status === 401) {
+            setError('Invalid email or password.');
           } else {
             setError(err.response?.data?.message || 'Login failed');
           }
@@ -124,8 +128,16 @@ export function Landing() {
             required
           />
 
+          <Input
+            type="password"
+            placeholder={authMode === 'signup' ? 'Password (8+ characters)' : 'Password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+
           <Button type="submit" fullWidth disabled={isLoading}>
-            {isLoading ? 'Loading...' : 'Continue'}
+            {isLoading ? 'Loading...' : authMode === 'signup' ? 'Create Account' : 'Sign In'}
           </Button>
         </form>
 
