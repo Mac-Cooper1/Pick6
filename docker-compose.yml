@@ -9,7 +9,9 @@ services:
       POSTGRES_PASSWORD: pick6local
       POSTGRES_DB: pick6
     ports:
-      - "5432:5432"
+      # Host port 5433: this machine already runs a native Homebrew Postgres
+      # on 5432, so the Pick 6 container lives one port over.
+      - "5433:5432"
     volumes:
       - pick6_postgres_data:/var/lib/postgresql/data
     healthcheck:

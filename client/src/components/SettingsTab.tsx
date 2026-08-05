@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { leagueApi, MyLeague } from '../services/api';
+import { leagueApi, adminApi, swapApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
 
@@ -25,9 +25,49 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   const [draftDate, setDraftDate] = useState('');
   const [draftTime, setDraftTime] = useState('');
   const [pickDeadline, setPickDeadline] = useState(60);
-  const [draftType, setDraftType] = useState<'SNAKE' | 'LINEAR'>('SNAKE');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [swapMessage, setSwapMessage] = useState<string | null>(null);
+
+  // Swap window state + commissioner open/close
+  const { data: swapState } = useQuery({
+    queryKey: ['swapState', leagueId],
+    queryFn: () => swapApi.getState(leagueId),
+  });
+
+  const swapWindowMutation = useMutation({
+    mutationFn: (action: 'open' | 'close') =>
+      action === 'open' ? swapApi.open(leagueId) : swapApi.close(leagueId),
+    onSuccess: (state) => {
+      setSwapMessage(
+        state.status === 'OPEN'
+          ? 'Swap window is open — turn order posted in Draft Recap.'
+          : 'Swap window closed.'
+      );
+      queryClient.invalidateQueries({ queryKey: ['swapState', leagueId] });
+    },
+    onError: (err: any) => {
+      setSwapMessage(err.response?.data?.message || 'Swap window change failed');
+    },
+  });
+
+  // Manual "sync now" (commissioner) — the scheduled cron does this automatically
+  const syncMutation = useMutation({
+    mutationFn: () => adminApi.syncWeek(leagueId, currentLeague!.currentWeek),
+    onSuccess: (data: any) => {
+      const warnings = data.errors?.length ? `, ${data.errors.length} warnings` : '';
+      setSyncResult(
+        `Week ${data.weekNumber}: ${data.gamesCreated} games synced, ${data.oddsUpdated} odds updated, ${data.scoresCalculated} members rescored${warnings}`
+      );
+      queryClient.invalidateQueries({ queryKey: ['weeklyStandings'] });
+      queryClient.invalidateQueries({ queryKey: ['overallStandings'] });
+      queryClient.invalidateQueries({ queryKey: ['allMatchups', leagueId] });
+    },
+    onError: (err: any) => {
+      setSyncResult(err.response?.data?.message || 'Sync failed');
+    },
+  });
 
   // Initialize form with current values
   useEffect(() => {
@@ -45,7 +85,6 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     mutationFn: async (settings: {
       draftScheduledAt?: string | null;
       pickDeadlineSeconds?: number;
-      draftType?: 'SNAKE' | 'LINEAR';
     }) => {
       return leagueApi.updateSettings(leagueId, settings);
     },
@@ -78,7 +117,6 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     updateSettingsMutation.mutate({
       draftScheduledAt: scheduledAt.toISOString(),
       pickDeadlineSeconds: pickDeadline,
-      draftType,
     });
   };
 
@@ -171,6 +209,87 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
         </div>
       </div>
 
+      {/* Commissioner: manual sync */}
+      {isCommissioner && (
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
+              Commissioner
+            </span>
+            <h3 className="text-lg font-bold text-gray-800">Scoring</h3>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Scores sync automatically on a schedule. Use this to pull games, odds,
+            and scores for week {currentLeague.currentWeek} right now.
+          </p>
+          {syncResult && (
+            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+              {syncResult}
+            </div>
+          )}
+          <button
+            onClick={() => {
+              setSyncResult(null);
+              syncMutation.mutate();
+            }}
+            disabled={syncMutation.isPending}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+          >
+            {syncMutation.isPending ? 'Syncing…' : `Sync Week ${currentLeague.currentWeek} Now`}
+          </button>
+        </div>
+      )}
+
+      {/* Commissioner: week-5 swap window */}
+      {isCommissioner && (
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
+              Commissioner
+            </span>
+            <h3 className="text-lg font-bold text-gray-800">Week 5 Swap Window</h3>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            Opens automatically once week 5 wraps. Status:{' '}
+            <span className="font-semibold">
+              {swapState?.status === 'OPEN'
+                ? 'OPEN'
+                : swapState?.status === 'CLOSED'
+                ? 'CLOSED'
+                : 'Not opened yet'}
+            </span>
+          </p>
+          {swapMessage && (
+            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+              {swapMessage}
+            </div>
+          )}
+          <div className="flex gap-2">
+            {swapState?.status === 'NOT_OPEN' && (
+              <button
+                onClick={() => swapWindowMutation.mutate('open')}
+                disabled={swapWindowMutation.isPending}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-300 transition-colors"
+              >
+                Open swap window now
+              </button>
+            )}
+            {swapState?.status === 'OPEN' && (
+              <button
+                onClick={() => swapWindowMutation.mutate('close')}
+                disabled={swapWindowMutation.isPending}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-300 transition-colors"
+              >
+                Close swap window
+              </button>
+            )}
+            {swapState?.status === 'CLOSED' && (
+              <p className="text-sm text-gray-500">The window is closed for the season.</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Commissioner Settings */}
       {isCommissioner ? (
         <div className="bg-white rounded-lg shadow p-6">
@@ -220,38 +339,6 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
                   Draft will automatically start at the scheduled time
-                </p>
-              </div>
-
-              {/* Draft Type */}
-              <div>
-                <h4 className="font-semibold text-gray-700 mb-3">Draft Type</h4>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="draftType"
-                      value="SNAKE"
-                      checked={draftType === 'SNAKE'}
-                      onChange={() => setDraftType('SNAKE')}
-                      className="text-green-600 focus:ring-green-500"
-                    />
-                    <span className="text-gray-700">Snake Draft</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="draftType"
-                      value="LINEAR"
-                      checked={draftType === 'LINEAR'}
-                      onChange={() => setDraftType('LINEAR')}
-                      className="text-green-600 focus:ring-green-500"
-                    />
-                    <span className="text-gray-700">Linear Draft</span>
-                  </label>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Snake: Order reverses each round (1-2-3 then 3-2-1). Linear: Same order every round.
                 </p>
               </div>
 

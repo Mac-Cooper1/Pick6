@@ -1,42 +1,50 @@
 import { Request, Response } from 'express';
+import bcrypt from 'bcrypt';
 import { generateToken } from '../utils/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import prisma from '../lib/prisma';
 
+const BCRYPT_ROUNDS = 10;
+const MIN_PASSWORD_LENGTH = 8;
+
 /**
- * Register a new user or login existing user
+ * Register a new user
  * POST /api/auth/register
- * Body: { name: string, email: string }
+ * Body: { name: string, email: string, password: string }
  */
 export async function register(req: Request, res: Response, next: any) {
   try {
-    const { name, email } = req.body;
+    const { name, email, password } = req.body;
 
-    if (!name || !email) {
-      throw new AppError('Name and email are required', 400);
+    if (!name || !email || !password) {
+      throw new AppError('Name, email, and password are required', 400);
     }
 
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       throw new AppError('Invalid email format', 400);
     }
 
-    // Check if user already exists
-    let user = await prisma.user.findUnique({
+    if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+      throw new AppError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 400);
+    }
+
+    const existing = await prisma.user.findUnique({
       where: { email },
     });
 
-    if (user) {
+    if (existing) {
       throw new AppError('User with this email already exists', 409);
     }
 
-    // Create new user
-    user = await prisma.user.create({
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+    const user = await prisma.user.create({
       data: {
         name,
         email,
+        passwordHash,
       },
     });
 
@@ -58,22 +66,27 @@ export async function register(req: Request, res: Response, next: any) {
 /**
  * Login existing user
  * POST /api/auth/login
- * Body: { email: string }
+ * Body: { email: string, password: string }
  */
 export async function login(req: Request, res: Response, next: any) {
   try {
-    const { email } = req.body;
+    const { email, password } = req.body;
 
-    if (!email) {
-      throw new AppError('Email is required', 400);
+    if (!email || !password) {
+      throw new AppError('Email and password are required', 400);
     }
 
     const user = await prisma.user.findUnique({
       where: { email },
     });
 
-    if (!user) {
-      throw new AppError('User not found', 404);
+    // Same 401 whether the email is unknown or the password is wrong —
+    // don't leak which accounts exist
+    const passwordOk =
+      user !== null && (await bcrypt.compare(password, user.passwordHash));
+
+    if (!user || !passwordOk) {
+      throw new AppError('Invalid email or password', 401);
     }
 
     const token = generateToken(user.id, user.email);

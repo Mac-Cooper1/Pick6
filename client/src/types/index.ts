@@ -10,6 +10,20 @@ export interface AuthResponse {
   token: string;
 }
 
+// Conference slots — the five draftable slots plus NONE for unslotted teams
+export type ConferenceSlot = 'SEC' | 'BIG_TEN' | 'ACC_ND' | 'BIG_12' | 'G6' | 'NONE';
+
+export const DRAFT_SLOTS: ConferenceSlot[] = ['SEC', 'BIG_TEN', 'ACC_ND', 'BIG_12', 'G6'];
+
+export const SLOT_LABELS: Record<ConferenceSlot, string> = {
+  SEC: 'SEC',
+  BIG_TEN: 'Big Ten',
+  ACC_ND: 'ACC + ND',
+  BIG_12: 'Big 12',
+  G6: 'Group of 6',
+  NONE: 'Unslotted',
+};
+
 // League types
 export interface League {
   id: number;
@@ -23,13 +37,11 @@ export interface League {
 export interface CreateLeagueData {
   name: string;
   maxPlayers: number;
-  password: string;
   customJoinCode?: string;
 }
 
 export interface JoinLeagueData {
   joinCode: string;
-  password: string;
 }
 
 // Team types
@@ -37,13 +49,16 @@ export interface Team {
   id: number;
   name: string;
   conference: string;
+  slot: ConferenceSlot;
+  abbreviation?: string | null;
 }
 
-// Draft types
+// Draft recap pick (REST /draft/:leagueId/picks)
 export interface DraftPick {
   id: number;
   pickNumber: number;
   round: number;
+  wasAutoPick: boolean;
   user: {
     id: number;
     name: string;
@@ -51,11 +66,25 @@ export interface DraftPick {
   team: Team;
 }
 
-export interface DraftPickRequest {
+// Roster entry (REST /rosters/:leagueId/*)
+export interface RosterEntry {
+  slot: ConferenceSlot;
+  slotLabel: string;
   teamId: number;
+  teamName: string;
+  conference: string;
+  abbreviation: string | null;
+  fromWeek: number;
 }
 
-// League member with teams
+export interface MemberRoster {
+  userId: number;
+  userName: string;
+  swapUsed: boolean;
+  roster: RosterEntry[];
+}
+
+// League member with teams (REST /leagues/:leagueId/members)
 export interface LeagueMember {
   id: number;
   name: string;
@@ -84,25 +113,4 @@ export interface ErrorResponse {
   error: string;
   message: string;
   statusCode: number;
-}
-
-// Game result types (for admin)
-export interface GameResult {
-  id: number;
-  team: Team;
-  weekNumber: number;
-  opponent: string;
-  result: 'win' | 'loss';
-  wasUpset: boolean;
-  points: number;
-  gameDate: string;
-}
-
-export interface GameResultRequest {
-  teamId: number;
-  weekNumber: number;
-  opponent: string;
-  result: 'win' | 'loss';
-  wasUpset: boolean;
-  gameDate: string;
 }

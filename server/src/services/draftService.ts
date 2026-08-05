@@ -1,18 +1,36 @@
 /**
  * Draft Service
  *
- * Handles advanced draft logic including:
- * - Snake draft order
- * - Scheduled draft start
- * - Timed picks with deadlines
- * - Draft queue management
- * - Autopick when user times out
+ * Slot-aware snake draft: 5 rounds, each player fills one team per
+ * conference slot (SEC, Big Ten, ACC+ND, Big 12, Group of 6). No two
+ * players may roster the same team in a league.
+ *
+ * Handles snake order, scheduled auto-start, timed picks with deadlines,
+ * draft queues, and autopick on timeout.
  */
 
 import prisma from '../lib/prisma';
-import { AcquisitionType, DraftStatus } from '@prisma/client';
+import { ConferenceSlot, DraftStatus } from '@prisma/client';
+import { getRankingsMap } from './espnClient';
 
-const TEAMS_PER_ROSTER = 6;
+export const DRAFT_SLOTS: ConferenceSlot[] = [
+  ConferenceSlot.SEC,
+  ConferenceSlot.BIG_TEN,
+  ConferenceSlot.ACC_ND,
+  ConferenceSlot.BIG_12,
+  ConferenceSlot.G6,
+];
+
+export const TEAMS_PER_ROSTER = DRAFT_SLOTS.length; // 5
+
+export const SLOT_LABELS: Record<ConferenceSlot, string> = {
+  SEC: 'SEC',
+  BIG_TEN: 'Big Ten',
+  ACC_ND: 'ACC + Notre Dame',
+  BIG_12: 'Big 12',
+  G6: 'Group of 6',
+  NONE: 'Unslotted',
+};
 
 /**
  * Check if a scheduled draft should start
@@ -24,14 +42,12 @@ export async function checkScheduledDraft(leagueId: number): Promise<boolean> {
 
   if (!league) return false;
 
-  // If draft is scheduled and the time has arrived
   if (
     league.draftStatus === DraftStatus.SCHEDULED &&
     league.draftScheduledAt &&
     new Date() >= league.draftScheduledAt &&
     !league.draftStarted
   ) {
-    // Auto-start the draft
     await startDraft(leagueId);
     return true;
   }
@@ -51,10 +67,8 @@ export function getSnakeDraftUserIndex(
   const positionInRound = ((pickNumber - 1) % memberCount) + 1;
 
   if (round % 2 === 1) {
-    // Odd round: forward order (1, 2, 3, ... N)
     return positionInRound - 1;
   } else {
-    // Even round: reverse order (N, N-1, ... 1)
     return memberCount - positionInRound;
   }
 }
@@ -64,6 +78,20 @@ export function getSnakeDraftUserIndex(
  */
 export function getRoundNumber(pickNumber: number, memberCount: number): number {
   return Math.ceil(pickNumber / memberCount);
+}
+
+/**
+ * Slots a user has already filled in this league's draft
+ */
+async function getFilledSlots(
+  leagueId: number,
+  userId: number
+): Promise<ConferenceSlot[]> {
+  const picks = await prisma.draftPick.findMany({
+    where: { leagueId, userId },
+    include: { team: { select: { slot: true } } },
+  });
+  return picks.map((p) => p.team.slot);
 }
 
 /**
@@ -87,10 +115,13 @@ export async function startDraft(leagueId: number) {
     throw new Error('Need at least 2 members to start draft');
   }
 
-  // Randomly assign draft positions
-  const shuffledMembers = [...league.members].sort(() => Math.random() - 0.5);
+  // Fisher-Yates shuffle for unbiased draft order
+  const shuffledMembers = [...league.members];
+  for (let i = shuffledMembers.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledMembers[i], shuffledMembers[j]] = [shuffledMembers[j], shuffledMembers[i]];
+  }
 
-  // Update members with draft positions
   for (let i = 0; i < shuffledMembers.length; i++) {
     await prisma.leagueMember.update({
       where: { id: shuffledMembers[i].id },
@@ -98,11 +129,9 @@ export async function startDraft(leagueId: number) {
     });
   }
 
-  // Calculate first pick deadline
   const now = new Date();
   const deadline = new Date(now.getTime() + league.pickDeadlineSeconds * 1000);
 
-  // Start the draft
   await prisma.league.update({
     where: { id: leagueId },
     data: {
@@ -151,7 +180,6 @@ export async function getDraftState(leagueId: number) {
   const totalPicks = memberCount * TEAMS_PER_ROSTER;
   const currentPick = league.currentPickNumber;
 
-  // Get user on the clock
   let onTheClockUserId: number | null = null;
   if (league.draftStarted && !league.draftComplete && currentPick <= totalPicks) {
     const userIndex = getSnakeDraftUserIndex(currentPick, memberCount);
@@ -160,15 +188,24 @@ export async function getDraftState(leagueId: number) {
     onTheClockUserId = orderedMembers[userIndex]?.userId || null;
   }
 
+  // Per-member filled slots (drives the slot-picker UI)
+  const filledSlotsByUser = new Map<number, ConferenceSlot[]>();
+  for (const pick of league.draftPicks) {
+    const list = filledSlotsByUser.get(pick.userId) || [];
+    list.push(pick.team.slot);
+    filledSlotsByUser.set(pick.userId, list);
+  }
+
   return {
     leagueId,
     draftStarted: league.draftStarted,
     draftComplete: league.draftComplete,
     draftStatus: league.draftStatus,
     draftScheduledAt: league.draftScheduledAt,
-    draftType: league.draftType,
     currentPickNumber: currentPick,
     totalPicks,
+    rounds: TEAMS_PER_ROSTER,
+    slots: DRAFT_SLOTS,
     currentRound: currentPick > 0 ? getRoundNumber(currentPick, memberCount) : 0,
     onTheClockUserId,
     pickDeadline: league.currentPickDeadline,
@@ -177,6 +214,7 @@ export async function getDraftState(leagueId: number) {
       userId: m.userId,
       name: m.user.name,
       draftPosition: m.draftPosition,
+      filledSlots: filledSlotsByUser.get(m.userId) || [],
     })),
     picks: league.draftPicks.map((p) => ({
       pickNumber: p.pickNumber,
@@ -185,13 +223,18 @@ export async function getDraftState(leagueId: number) {
       userName: p.user.name,
       teamId: p.teamId,
       teamName: p.team.name,
+      teamSlot: p.team.slot,
+      conference: p.team.conference,
       wasAutoPick: p.wasAutoPick,
     })),
   };
 }
 
 /**
- * Make a draft pick
+ * Make a draft pick.
+ * Validates turn order, league-wide team availability, and that the team's
+ * conference slot is still open for the picking user. Pick + roster writes
+ * happen in one transaction.
  */
 export async function makePick(
   leagueId: number,
@@ -231,7 +274,18 @@ export async function makePick(
     throw new Error('Not your turn to pick');
   }
 
-  // Verify team is available
+  const pickingUserId = isAutoPick ? expectedUserId! : userId;
+
+  // Verify team exists and is in the draft pool
+  const team = await prisma.team.findUnique({ where: { id: teamId } });
+  if (!team) {
+    throw new Error('Team not found');
+  }
+  if (team.slot === ConferenceSlot.NONE) {
+    throw new Error(`${team.name} is not in the draft pool`);
+  }
+
+  // Verify team is available league-wide
   const existingPick = await prisma.draftPick.findUnique({
     where: { leagueId_teamId: { leagueId, teamId } },
   });
@@ -240,81 +294,75 @@ export async function makePick(
     throw new Error('Team already drafted');
   }
 
-  // Verify team exists
-  const team = await prisma.team.findUnique({ where: { id: teamId } });
-  if (!team) {
-    throw new Error('Team not found');
+  // Verify the user's slot for this team is still open
+  const filledSlots = await getFilledSlots(leagueId, pickingUserId);
+
+  if (filledSlots.length >= TEAMS_PER_ROSTER) {
+    throw new Error(`User has already drafted ${TEAMS_PER_ROSTER} teams`);
   }
 
-  // Check user hasn't drafted 6 teams already
-  const userPickCount = await prisma.draftPick.count({
-    where: { leagueId, userId: isAutoPick ? expectedUserId! : userId },
-  });
-
-  if (userPickCount >= TEAMS_PER_ROSTER) {
-    throw new Error('User has already drafted 6 teams');
+  if (filledSlots.includes(team.slot)) {
+    throw new Error(`${SLOT_LABELS[team.slot]} slot is already filled`);
   }
 
   const round = getRoundNumber(currentPick, memberCount);
-  const pickingUserId = isAutoPick ? expectedUserId! : userId;
-
-  // Create the pick
-  const draftPick = await prisma.draftPick.create({
-    data: {
-      leagueId,
-      userId: pickingUserId,
-      teamId,
-      pickNumber: currentPick,
-      round,
-      wasAutoPick: isAutoPick,
-    },
-    include: { team: true, user: true },
-  });
-
-  // Also create RosterTeam entry
-  await prisma.rosterTeam.create({
-    data: {
-      leagueId,
-      userId: pickingUserId,
-      teamId,
-      acquiredVia: AcquisitionType.DRAFT,
-    },
-  });
-
-  // Remove from user's queue if present
-  await prisma.draftQueue.deleteMany({
-    where: { leagueId, userId: pickingUserId, teamId },
-  });
-
   const totalPicks = memberCount * TEAMS_PER_ROSTER;
   const nextPick = currentPick + 1;
   const draftComplete = nextPick > totalPicks;
+  const now = new Date();
+  const nextDeadline = draftComplete
+    ? null
+    : new Date(now.getTime() + league.pickDeadlineSeconds * 1000);
 
-  // Update league state
-  if (draftComplete) {
-    await prisma.league.update({
-      where: { id: leagueId },
+  // Pick, roster row, queue cleanup, and league advance — atomically.
+  // The DB uniques (DraftPick leagueId+teamId, RosterSlot partial indexes)
+  // are the backstop against concurrent picks of the same team.
+  const draftPick = await prisma.$transaction(async (tx) => {
+    const pick = await tx.draftPick.create({
       data: {
-        draftComplete: true,
-        draftStatus: DraftStatus.COMPLETE,
-        currentPickNumber: nextPick,
-        currentPickDeadline: null,
+        leagueId,
+        userId: pickingUserId,
+        teamId,
+        pickNumber: currentPick,
+        round,
+        wasAutoPick: isAutoPick,
+      },
+      include: { team: true, user: true },
+    });
+
+    await tx.rosterSlot.create({
+      data: {
+        leagueId,
+        userId: pickingUserId,
+        slot: team.slot,
+        teamId,
+        fromWeek: 1,
       },
     });
-  } else {
-    const now = new Date();
-    const deadline = new Date(now.getTime() + league.pickDeadlineSeconds * 1000);
 
-    await prisma.league.update({
-      where: { id: leagueId },
-      data: {
-        currentPickNumber: nextPick,
-        currentPickDeadline: deadline,
-      },
+    await tx.draftQueue.deleteMany({
+      where: { leagueId, userId: pickingUserId, teamId },
     });
-  }
 
-  // Get next user on clock
+    await tx.league.update({
+      where: { id: leagueId },
+      data: draftComplete
+        ? {
+            draftComplete: true,
+            draftStatus: DraftStatus.COMPLETE,
+            currentPickNumber: nextPick,
+            currentPickDeadline: null,
+          }
+        : {
+            currentPickNumber: nextPick,
+            currentPickDeadline: nextDeadline,
+          },
+    });
+
+    return pick;
+  });
+
+  // Next user on the clock
   let nextOnClock: { userId: number; userName: string } | null = null;
   if (!draftComplete) {
     const nextUserIndex = getSnakeDraftUserIndex(nextPick, memberCount);
@@ -325,16 +373,10 @@ export async function makePick(
     }
   }
 
-  // Get available team count
-  const draftedTeamCount = currentPick; // This pick was just made
-  const totalTeams = await prisma.team.count();
-  const availableCount = totalTeams - draftedTeamCount;
-
-  // Get current pick deadline for next pick
-  const updatedLeague = await prisma.league.findUnique({
-    where: { id: leagueId },
-    select: { currentPickDeadline: true },
+  const totalTeams = await prisma.team.count({
+    where: { slot: { not: ConferenceSlot.NONE } },
   });
+  const availableCount = totalTeams - currentPick;
 
   return {
     pick: {
@@ -344,19 +386,22 @@ export async function makePick(
       userName: draftPick.user.name,
       teamId: draftPick.teamId,
       teamName: draftPick.team.name,
+      teamSlot: draftPick.team.slot,
       wasAutoPick: draftPick.wasAutoPick,
     },
     isComplete: draftComplete,
     nextOnClock,
     availableCount,
-    currentPickDeadline: updatedLeague?.currentPickDeadline,
+    currentPickDeadline: nextDeadline,
     nextPickNumber: draftComplete ? null : nextPick,
   };
 }
 
 /**
- * Process autopick when time expires
- * Returns the best available team from user's queue, or highest ranked available
+ * Process autopick when time expires.
+ * Prefers the user's queue (first queued team that is available and fills an
+ * open slot); falls back to the best available AP-ranked team in an open
+ * slot, then random.
  */
 export async function processAutoPick(leagueId: number) {
   const state = await getDraftState(leagueId);
@@ -369,43 +414,68 @@ export async function processAutoPick(leagueId: number) {
     return null;
   }
 
-  // Check if deadline has passed
   if (state.pickDeadline && new Date() < state.pickDeadline) {
     return null; // Not yet expired
   }
 
   const userId = state.onTheClockUserId;
 
-  // Get user's queue
+  const draftedTeamIds = state.picks.map((p) => p.teamId);
+  const member = state.members.find((m) => m.userId === userId);
+  const filledSlots = member?.filledSlots || [];
+  const openSlots = DRAFT_SLOTS.filter((s) => !filledSlots.includes(s));
+
+  // First choice: user's queue
   const queue = await prisma.draftQueue.findMany({
     where: { leagueId, userId },
     orderBy: { priority: 'asc' },
     include: { team: true },
   });
 
-  // Get already drafted teams
-  const draftedTeamIds = state.picks.map((p) => p.teamId);
-
-  // Find first available team from queue
   let teamToPick: { id: number; name: string } | null = null;
 
   for (const item of queue) {
-    if (!draftedTeamIds.includes(item.teamId)) {
+    if (
+      !draftedTeamIds.includes(item.teamId) &&
+      openSlots.includes(item.team.slot)
+    ) {
       teamToPick = { id: item.teamId, name: item.team.name };
       break;
     }
   }
 
-  // If no queue or all queued teams taken, pick best available
+  // Fallback: best available by AP rank among open slots, else random
   if (!teamToPick) {
     const availableTeams = await prisma.team.findMany({
-      where: { id: { notIn: draftedTeamIds } },
-      orderBy: { name: 'asc' }, // Simple ordering by name; could use ranking
-      take: 1,
+      where: {
+        id: { notIn: draftedTeamIds },
+        slot: { in: openSlots },
+      },
     });
 
     if (availableTeams.length > 0) {
-      teamToPick = { id: availableTeams[0].id, name: availableTeams[0].name };
+      let rankings: Map<string, number> | null = null;
+      try {
+        rankings = await getRankingsMap();
+      } catch {
+        rankings = null;
+      }
+
+      let best = null as (typeof availableTeams)[number] | null;
+      let bestRank = Infinity;
+      if (rankings) {
+        for (const t of availableTeams) {
+          const rank = t.espnTeamId ? rankings.get(t.espnTeamId) : undefined;
+          if (rank !== undefined && rank < bestRank) {
+            best = t;
+            bestRank = rank;
+          }
+        }
+      }
+
+      const chosen =
+        best || availableTeams[Math.floor(Math.random() * availableTeams.length)];
+      teamToPick = { id: chosen.id, name: chosen.name };
     }
   }
 
@@ -435,20 +505,22 @@ export async function setDraftQueue(
   userId: number,
   teamIds: number[]
 ) {
-  // Delete existing queue
-  await prisma.draftQueue.deleteMany({
-    where: { leagueId, userId },
+  await prisma.$transaction(async (tx) => {
+    await tx.draftQueue.deleteMany({
+      where: { leagueId, userId },
+    });
+
+    if (teamIds.length > 0) {
+      await tx.draftQueue.createMany({
+        data: teamIds.map((teamId, index) => ({
+          leagueId,
+          userId,
+          teamId,
+          priority: index + 1,
+        })),
+      });
+    }
   });
-
-  // Create new queue entries
-  const entries = teamIds.map((teamId, index) => ({
-    leagueId,
-    userId,
-    teamId,
-    priority: index + 1,
-  }));
-
-  await prisma.draftQueue.createMany({ data: entries });
 
   return getDraftQueue(leagueId, userId);
 }
@@ -461,7 +533,6 @@ export async function addToQueue(
   userId: number,
   teamId: number
 ) {
-  // Get current max priority
   const maxItem = await prisma.draftQueue.findFirst({
     where: { leagueId, userId },
     orderBy: { priority: 'desc' },
@@ -486,23 +557,4 @@ export async function removeFromQueue(
   return prisma.draftQueue.deleteMany({
     where: { leagueId, userId, teamId },
   });
-}
-
-/**
- * Reorder queue
- */
-export async function reorderQueue(
-  leagueId: number,
-  userId: number,
-  teamIds: number[]
-) {
-  // Update priorities
-  for (let i = 0; i < teamIds.length; i++) {
-    await prisma.draftQueue.updateMany({
-      where: { leagueId, userId, teamId: teamIds[i] },
-      data: { priority: i + 1 },
-    });
-  }
-
-  return getDraftQueue(leagueId, userId);
 }

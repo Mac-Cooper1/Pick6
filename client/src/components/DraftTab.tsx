@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { draftEnhancedApi, leagueApi } from '../services/api';
+import { draftApi, leagueApi } from '../services/api';
 import { DraftRoom } from './DraftRoom';
 
 interface DraftTabProps {
@@ -11,7 +11,7 @@ export function DraftTab({ leagueId }: DraftTabProps) {
   // Get draft state to determine which view to show
   const { data: draftState, isLoading } = useQuery({
     queryKey: ['draftState', leagueId],
-    queryFn: () => draftEnhancedApi.getDraftState(leagueId),
+    queryFn: () => draftApi.getDraftState(leagueId),
     refetchInterval: 5000, // Poll every 5 seconds for status changes
   });
 

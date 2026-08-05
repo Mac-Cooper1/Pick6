@@ -397,19 +397,3 @@ export function setIOInstance(io: Server) {
 export function getIOInstance(): Server | null {
   return ioInstance;
 }
-
-/**
- * Broadcast draft state update (for use from REST endpoints)
- */
-export async function broadcastDraftUpdate(leagueId: number) {
-  const io = getIOInstance();
-  if (!io) return;
-
-  try {
-    const state = await getDraftState(leagueId);
-    const roomName = `league:${leagueId}`;
-    io.to(roomName).emit('draft:state', state);
-  } catch (error) {
-    console.error(`[Socket] Error broadcasting draft update for league ${leagueId}:`, error);
-  }
-}

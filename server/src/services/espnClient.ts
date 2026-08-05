@@ -118,7 +118,7 @@ export async function fetchScoreboard(
 ): Promise<ESPNScoreboardResponse> {
   const url = new URL(`${ESPN_BASE_URL}/scoreboard`);
   url.searchParams.set('groups', DEFAULT_GROUP_ID);
-  url.searchParams.set('limit', '100');
+  url.searchParams.set('limit', '300');
   url.searchParams.set('seasontype', seasonType.toString());
   url.searchParams.set('week', weekNumber.toString());
   url.searchParams.set('dates', seasonYear.toString());
@@ -144,7 +144,7 @@ export async function fetchScoreboardByDate(
 ): Promise<ESPNScoreboardResponse> {
   const url = new URL(`${ESPN_BASE_URL}/scoreboard`);
   url.searchParams.set('groups', DEFAULT_GROUP_ID);
-  url.searchParams.set('limit', '100');
+  url.searchParams.set('limit', '300');
 
   if (endDate) {
     url.searchParams.set('dates', `${startDate}-${endDate}`);
@@ -265,21 +265,71 @@ export async function getGamesForWeek(
 }
 
 /**
- * Get all teams from ESPN (useful for initial setup/verification)
+ * Full team catalog (id → names/abbreviation) from the site API. The site
+ * /teams endpoint IGNORES the `groups` filter (it returns every college team
+ * down to D3), so it is only good as a lookup catalog — conference
+ * membership comes from fetchConferenceTeamIds (core API) instead.
  */
-export async function fetchAllTeams(): Promise<ESPNTeam[]> {
-  const url = `${ESPN_BASE_URL}/teams?groups=${DEFAULT_GROUP_ID}&limit=200`;
+export interface EspnCatalogTeam {
+  espnId: string;
+  location: string; // canonical short name, e.g. "Boise State"
+  displayName: string; // full name, e.g. "Boise State Broncos"
+  abbreviation: string | null;
+}
 
-  console.log(`[ESPN] Fetching all teams: ${url}`);
+export async function fetchTeamCatalog(): Promise<Map<string, EspnCatalogTeam>> {
+  const url = `${ESPN_BASE_URL}/teams?limit=1000`;
+  console.log(`[ESPN] Fetching team catalog: ${url}`);
 
   const response = await fetch(url);
-
   if (!response.ok) {
     throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
   }
 
   const data: any = await response.json();
-  return data.sports[0]?.leagues[0]?.teams?.map((t: any) => t.team) || [];
+  const teams = data.sports?.[0]?.leagues?.[0]?.teams || [];
+
+  const catalog = new Map<string, EspnCatalogTeam>();
+  for (const entry of teams) {
+    const t = entry.team;
+    if (!t?.id) continue;
+    catalog.set(String(t.id), {
+      espnId: String(t.id),
+      location: t.location || t.displayName,
+      displayName: t.displayName || t.location,
+      abbreviation: t.abbreviation || null,
+    });
+  }
+
+  return catalog;
+}
+
+/**
+ * Team IDs for one conference in a given season, from ESPN's core API —
+ * the authoritative source for season-specific conference membership
+ * (this is how the seed knows the 2026 Pac-12 has 8 members).
+ */
+export async function fetchConferenceTeamIds(
+  seasonYear: number,
+  espnGroupId: number
+): Promise<string[]> {
+  const url = `https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/${seasonYear}/types/2/groups/${espnGroupId}/teams?limit=100`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `ESPN core API error for group ${espnGroupId}: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const data: any = await response.json();
+  const items = data.items || [];
+  return items
+    .map((i: any) => {
+      const match = String(i.$ref || '').match(/\/teams\/(\d+)/);
+      return match ? match[1] : null;
+    })
+    .filter(Boolean) as string[];
 }
 
 // ============================================

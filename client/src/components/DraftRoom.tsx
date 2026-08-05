@@ -1,19 +1,15 @@
 /**
  * Live Draft Room Component
  *
- * Real-time multi-user draft room with Socket.IO
- * Features:
- * - Countdown timer for current pick
- * - Draft board grid
- * - Available teams list with search
- * - Activity feed
- * - Queue management
+ * Real-time slot-aware snake draft over Socket.IO: 5 rounds, one team per
+ * conference slot (SEC, Big Ten, ACC+ND, Big 12, Group of 6), league-wide
+ * team exclusivity. Countdown timer, draft board, queue, activity feed.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
-import { draftApi, draftEnhancedApi, leagueApi } from '../services/api';
+import { draftApi, leagueApi } from '../services/api';
 import {
   connectToDraft,
   disconnectFromDraft,
@@ -21,12 +17,9 @@ import {
   updateQueue as socketUpdateQueue,
   startDraft as socketStartDraft,
   DraftState,
-  DraftPick,
-  TimerUpdate,
-  PickMadeEvent,
 } from '../services/socket';
 import { ErrorMessage } from './ErrorMessage';
-import { Team } from '../types';
+import { Team, ConferenceSlot, DRAFT_SLOTS, SLOT_LABELS } from '../types';
 
 interface DraftRoomProps {
   leagueId: number;
@@ -40,6 +33,8 @@ interface ActivityItem {
   isAutoPick?: boolean;
 }
 
+type SlotFilter = 'ALL' | ConferenceSlot;
+
 export function DraftRoom({ leagueId }: DraftRoomProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -48,8 +43,12 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
   const [isConnected, setIsConnected] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  // Draft state from socket
+  // Draft state from socket (ref mirrors state so socket handlers never go stale)
   const [draftState, setDraftState] = useState<DraftState | null>(null);
+  const draftStateRef = useRef<DraftState | null>(null);
+  useEffect(() => {
+    draftStateRef.current = draftState;
+  }, [draftState]);
 
   // Timer state
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
@@ -58,6 +57,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
   // UI state
   const [searchTerm, setSearchTerm] = useState('');
+  const [slotFilter, setSlotFilter] = useState<SlotFilter>('ALL');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
@@ -83,7 +83,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
   // Get user's queue
   const { data: userQueue } = useQuery({
     queryKey: ['draftQueue', leagueId],
-    queryFn: () => draftEnhancedApi.getQueue(leagueId),
+    queryFn: () => draftApi.getQueue(leagueId),
     enabled: !!user,
   });
 
@@ -120,7 +120,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
       return;
     }
 
-    const socket = connectToDraft(leagueId, token, {
+    connectToDraft(leagueId, token, {
       onConnect: () => {
         setIsConnected(true);
         setConnectionError(null);
@@ -147,11 +147,11 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
         const { pick, isAutoPick } = event;
         addActivity({
           type: 'pick',
-          message: `${pick.userName} ${isAutoPick ? '(auto)' : ''} picked ${pick.teamName}`,
+          message: `${pick.userName} ${isAutoPick ? '(auto)' : ''} picked ${pick.teamName} (${SLOT_LABELS[pick.teamSlot]})`,
           isAutoPick,
         });
 
-        // Update local state
+        // Update local state (full draft:state follows from the server)
         setDraftState(prev => {
           if (!prev) return prev;
           return {
@@ -161,14 +161,16 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
             onTheClockUserId: event.nextOnClock?.userId ?? null,
             draftComplete: event.isComplete,
             draftStatus: event.isComplete ? 'COMPLETE' : prev.draftStatus,
+            members: prev.members.map(m =>
+              m.userId === pick.userId
+                ? { ...m, filledSlots: [...m.filledSlots, pick.teamSlot] }
+                : m
+            ),
           };
         });
 
-        // Clear selected team if it was picked
-        if (selectedTeam?.id === pick.teamId) {
-          setSelectedTeam(null);
-          setSearchTerm('');
-        }
+        // Clear selection if the picked team was selected (functional read, no stale closure)
+        setSelectedTeam(prev => (prev?.id === pick.teamId ? null : prev));
 
         // Invalidate queries
         queryClient.invalidateQueries({ queryKey: ['availableTeams', leagueId] });
@@ -188,13 +190,13 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
       },
 
       onUserJoined: (data) => {
-        const member = draftState?.members.find(m => m.userId === data.userId);
-        addActivity({ type: 'join', message: `${member?.name || 'User'} joined the draft room` });
+        const member = draftStateRef.current?.members.find(m => m.userId === data.userId);
+        addActivity({ type: 'join', message: `${member?.name || 'A player'} joined the draft room` });
       },
 
       onUserLeft: (data) => {
-        const member = draftState?.members.find(m => m.userId === data.userId);
-        addActivity({ type: 'leave', message: `${member?.name || 'User'} left the draft room` });
+        const member = draftStateRef.current?.members.find(m => m.userId === data.userId);
+        addActivity({ type: 'leave', message: `${member?.name || 'A player'} left the draft room` });
       },
 
       onQueueUpdated: (data) => {
@@ -243,9 +245,16 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     socketUpdateQueue(leagueId, newQueue);
   };
 
-  // Filter available teams
+  // My filled slots (drives which teams I can still draft)
+  const me = draftState?.members.find(m => m.userId === user?.id);
+  const myFilledSlots = me?.filledSlots ?? [];
+
+  const isSlotFilledForMe = (slot: ConferenceSlot) => myFilledSlots.includes(slot);
+
+  // Filter available teams by search + slot chip
   const filteredTeams = availableTeams?.filter(team =>
     team.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+    (slotFilter === 'ALL' || team.slot === slotFilter) &&
     !draftState?.picks.some(p => p.teamId === team.id)
   ) || [];
 
@@ -254,6 +263,8 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
   // Get user on clock name
   const userOnClock = draftState?.members.find(m => m.userId === draftState.onTheClockUserId);
+
+  const totalRounds = draftState?.rounds ?? DRAFT_SLOTS.length;
 
   // Format time remaining
   const formatTime = (ms: number) => {
@@ -280,23 +291,18 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     }
   };
 
-  // Get pick for specific round and position
-  const getPickForSlot = (round: number, position: number) => {
+  // Get pick for a board cell (snake order)
+  const getPickForCell = (round: number, position: number) => {
     const memberCount = draftState?.members.length || 0;
     if (memberCount === 0) return null;
 
-    // Calculate pick number for this slot
     let pickNumber: number;
-    if (draftState?.draftType === 'SNAKE') {
-      if (round % 2 === 1) {
-        // Odd round: forward
-        pickNumber = (round - 1) * memberCount + position;
-      } else {
-        // Even round: reverse
-        pickNumber = (round - 1) * memberCount + (memberCount - position + 1);
-      }
-    } else {
+    if (round % 2 === 1) {
+      // Odd round: forward
       pickNumber = (round - 1) * memberCount + position;
+    } else {
+      // Even round: reverse
+      pickNumber = (round - 1) * memberCount + (memberCount - position + 1);
     }
 
     return draftState?.picks.find(p => p.pickNumber === pickNumber);
@@ -330,6 +336,19 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
             }`}>
               {getStatusDisplay()}
             </span>
+          </div>
+
+          <div className="mb-6 text-gray-600 text-sm">
+            <p className="mb-2">
+              {totalRounds} rounds — one team from each slot:
+            </p>
+            <div className="flex flex-wrap justify-center gap-2 mb-4">
+              {DRAFT_SLOTS.map(slot => (
+                <span key={slot} className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">
+                  {SLOT_LABELS[slot]}
+                </span>
+              ))}
+            </div>
           </div>
 
           <div className="mb-6">
@@ -378,7 +397,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
       <div className="p-6">
         <div className="bg-white rounded-lg shadow p-8 text-center mb-6">
           <h2 className="text-2xl font-bold text-green-800 mb-4">Draft Complete!</h2>
-          <p className="text-gray-600">All teams have been drafted.</p>
+          <p className="text-gray-600">All teams have been drafted. See the Draft Recap tab for rosters by slot.</p>
         </div>
 
         {/* Final Draft Board */}
@@ -399,11 +418,11 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: 6 }).map((_, roundIndex) => (
+                {Array.from({ length: totalRounds }).map((_, roundIndex) => (
                   <tr key={roundIndex} className={roundIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                     <td className="p-3 font-bold text-gray-800">{roundIndex + 1}</td>
                     {draftState.members.map((member, posIndex) => {
-                      const pick = getPickForSlot(roundIndex + 1, posIndex + 1);
+                      const pick = getPickForCell(roundIndex + 1, posIndex + 1);
                       return (
                         <td key={member.userId} className="p-3">
                           {pick ? (
@@ -411,6 +430,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                               pick.userId === user?.id ? 'bg-green-100' : 'bg-gray-100'
                             }`}>
                               <div className="font-semibold text-sm">{pick.teamName}</div>
+                              <div className="text-xs text-gray-500">{SLOT_LABELS[pick.teamSlot]}</div>
                               {pick.wasAutoPick && (
                                 <span className="text-xs text-orange-600">(auto)</span>
                               )}
@@ -485,7 +505,11 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
           {/* Pick Interface (only when it's your turn) */}
           {isMyTurn && (
             <div className="bg-green-50 border-2 border-green-500 rounded-lg p-4">
-              <h3 className="font-bold text-green-800 mb-3">Make Your Pick</h3>
+              <h3 className="font-bold text-green-800 mb-1">Make Your Pick</h3>
+              <p className="text-xs text-green-700 mb-3">
+                Open slots:{' '}
+                {DRAFT_SLOTS.filter(s => !isSlotFilledForMe(s)).map(s => SLOT_LABELS[s]).join(', ')}
+              </p>
               <div className="flex gap-2">
                 <div className="flex-1 relative">
                   <input
@@ -500,19 +524,33 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                   />
                   {searchTerm && filteredTeams.length > 0 && !selectedTeam && (
                     <div className="absolute z-20 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg">
-                      {filteredTeams.slice(0, 15).map(team => (
-                        <div
-                          key={team.id}
-                          onClick={() => {
-                            setSelectedTeam(team);
-                            setSearchTerm(team.name);
-                          }}
-                          className="p-3 hover:bg-green-50 cursor-pointer border-b last:border-b-0"
-                        >
-                          <div className="font-medium">{team.name}</div>
-                          <div className="text-sm text-gray-600">{team.conference}</div>
-                        </div>
-                      ))}
+                      {filteredTeams.slice(0, 15).map(team => {
+                        const slotFilled = isSlotFilledForMe(team.slot);
+                        return (
+                          <div
+                            key={team.id}
+                            onClick={() => {
+                              if (slotFilled) return;
+                              setSelectedTeam(team);
+                              setSearchTerm(team.name);
+                            }}
+                            className={`p-3 border-b last:border-b-0 ${
+                              slotFilled
+                                ? 'opacity-40 cursor-not-allowed'
+                                : 'hover:bg-green-50 cursor-pointer'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="font-medium">{team.name}</div>
+                              <span className="text-xs font-semibold text-gray-500">{SLOT_LABELS[team.slot]}</span>
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              {team.conference}
+                              {slotFilled && ' — slot filled'}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -553,15 +591,18 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from({ length: 6 }).map((_, roundIndex) => (
+                  {Array.from({ length: totalRounds }).map((_, roundIndex) => (
                     <tr key={roundIndex} className={roundIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                       <td className="p-2 font-bold text-gray-800 sticky left-0 bg-inherit">{roundIndex + 1}</td>
                       {draftState.members.map((member, posIndex) => {
-                        const pick = getPickForSlot(roundIndex + 1, posIndex + 1);
-                        const isCurrentPick = draftState.currentPickNumber ===
-                          (roundIndex * draftState.members.length + posIndex + 1) ||
-                          (draftState.draftType === 'SNAKE' && roundIndex % 2 === 1 &&
-                           draftState.currentPickNumber === roundIndex * draftState.members.length + (draftState.members.length - posIndex));
+                        const round = roundIndex + 1;
+                        const position = posIndex + 1;
+                        const pick = getPickForCell(round, position);
+                        const memberCount = draftState.members.length;
+                        const cellPickNumber = round % 2 === 1
+                          ? (round - 1) * memberCount + position
+                          : (round - 1) * memberCount + (memberCount - position + 1);
+                        const isCurrentPick = draftState.currentPickNumber === cellPickNumber;
                         return (
                           <td
                             key={member.userId}
@@ -574,6 +615,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                                 pick.userId === user?.id ? 'bg-green-100' : 'bg-gray-100'
                               }`}>
                                 <div className="font-semibold truncate">{pick.teamName}</div>
+                                <div className="text-gray-500">{SLOT_LABELS[pick.teamSlot]}</div>
                                 {pick.wasAutoPick && (
                                   <span className="text-orange-600">(auto)</span>
                                 )}
@@ -591,9 +633,9 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
             </div>
           </div>
 
-          {/* Available Teams (collapsible on mobile) */}
+          {/* Available Teams */}
           <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="bg-gray-100 p-3 flex justify-between items-center">
+            <div className="bg-gray-100 p-3 flex flex-wrap justify-between items-center gap-2">
               <h3 className="font-bold text-gray-800">Available Teams ({filteredTeams.length})</h3>
               <input
                 type="text"
@@ -603,31 +645,59 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                 className="px-3 py-1 border rounded text-sm w-40"
               />
             </div>
-            <div className="max-h-64 overflow-y-auto p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-              {filteredTeams.map(team => (
+            {/* Slot filter chips */}
+            <div className="px-3 py-2 border-b flex flex-wrap gap-2">
+              {(['ALL', ...DRAFT_SLOTS] as SlotFilter[]).map(slot => (
                 <button
-                  key={team.id}
-                  onClick={() => {
-                    if (isMyTurn) {
-                      setSelectedTeam(team);
-                      setSearchTerm(team.name);
-                    } else {
-                      handleAddToQueue(team.id);
-                    }
-                  }}
-                  className={`p-2 text-left rounded text-sm hover:bg-green-50 transition-colors ${
-                    selectedTeam?.id === team.id ? 'bg-green-100 ring-2 ring-green-500' : 'bg-gray-50'
-                  } ${queue.includes(team.id) ? 'border-2 border-blue-400' : ''}`}
+                  key={slot}
+                  onClick={() => setSlotFilter(slot)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                    slotFilter === slot
+                      ? 'bg-green-600 text-white'
+                      : isSlotFilledForMe(slot as ConferenceSlot)
+                      ? 'bg-gray-100 text-gray-400 line-through'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <div className="font-medium truncate">{team.name}</div>
-                  <div className="text-xs text-gray-500">{team.conference}</div>
+                  {slot === 'ALL' ? 'All' : SLOT_LABELS[slot as ConferenceSlot]}
                 </button>
               ))}
+            </div>
+            <div className="max-h-64 overflow-y-auto p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+              {filteredTeams.map(team => {
+                const slotFilled = isSlotFilledForMe(team.slot);
+                const blocked = isMyTurn && slotFilled;
+                return (
+                  <button
+                    key={team.id}
+                    disabled={blocked}
+                    onClick={() => {
+                      if (isMyTurn) {
+                        setSelectedTeam(team);
+                        setSearchTerm(team.name);
+                      } else {
+                        handleAddToQueue(team.id);
+                      }
+                    }}
+                    title={blocked ? `${SLOT_LABELS[team.slot]} slot already filled` : undefined}
+                    className={`p-2 text-left rounded text-sm transition-colors ${
+                      blocked
+                        ? 'bg-gray-50 opacity-40 cursor-not-allowed'
+                        : 'hover:bg-green-50'
+                    } ${
+                      selectedTeam?.id === team.id ? 'bg-green-100 ring-2 ring-green-500' : 'bg-gray-50'
+                    } ${queue.includes(team.id) ? 'border-2 border-blue-400' : ''}`}
+                  >
+                    <div className="font-medium truncate">{team.name}</div>
+                    <div className="text-xs text-gray-500">{SLOT_LABELS[team.slot]}</div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* Sidebar - Activity + Queue */}
+        {/* Sidebar - Activity + Queue + Roster */}
         <div className="space-y-4">
           {/* Activity Feed */}
           <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -678,12 +748,31 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                   <div className="divide-y">
                     {queue.map((teamId, index) => {
                       const team = availableTeams?.find(t => t.id === teamId);
-                      if (!team) return null;
+                      const drafted = draftState.picks.some(p => p.teamId === teamId);
+                      const slotFilled = team ? isSlotFilledForMe(team.slot) : false;
                       return (
-                        <div key={teamId} className="p-2 flex items-center justify-between">
+                        <div
+                          key={teamId}
+                          className={`p-2 flex items-center justify-between ${
+                            drafted || slotFilled ? 'opacity-40' : ''
+                          }`}
+                        >
                           <div className="flex items-center gap-2">
                             <span className="text-gray-400 text-sm">{index + 1}.</span>
-                            <span className="font-medium text-sm">{team.name}</span>
+                            <div>
+                              <span className="font-medium text-sm">
+                                {team?.name || 'Drafted team'}
+                              </span>
+                              {team && (
+                                <span className="text-xs text-gray-400 ml-1">
+                                  {SLOT_LABELS[team.slot]}
+                                  {slotFilled && ' (slot filled)'}
+                                </span>
+                              )}
+                              {drafted && (
+                                <span className="text-xs text-red-400 ml-1">(taken)</span>
+                              )}
+                            </div>
                           </div>
                           <button
                             onClick={() => handleRemoveFromQueue(teamId)}
@@ -699,28 +788,41 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
               </div>
             )}
             <p className="p-2 text-xs text-gray-500 bg-gray-50">
-              Queue auto-picks if timer expires
+              Queue auto-picks if timer expires (skips filled slots)
             </p>
           </div>
 
-          {/* Your Roster */}
+          {/* Your Roster by Slot */}
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <div className="bg-green-600 text-white p-3">
-              <h3 className="font-bold">Your Roster ({draftState.picks.filter(p => p.userId === user?.id).length}/6)</h3>
+              <h3 className="font-bold">
+                Your Roster ({myFilledSlots.length}/{DRAFT_SLOTS.length})
+              </h3>
             </div>
             <div className="divide-y">
-              {draftState.picks.filter(p => p.userId === user?.id).map(pick => (
-                <div key={pick.pickNumber} className="p-3">
-                  <div className="font-semibold">{pick.teamName}</div>
-                  <div className="text-xs text-gray-500">
-                    Round {pick.round}, Pick #{pick.pickNumber}
-                    {pick.wasAutoPick && <span className="text-orange-600 ml-1">(auto)</span>}
+              {DRAFT_SLOTS.map(slot => {
+                const pick = draftState.picks.find(
+                  p => p.userId === user?.id && p.teamSlot === slot
+                );
+                return (
+                  <div key={slot} className="p-3 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-500 w-24">
+                      {SLOT_LABELS[slot]}
+                    </span>
+                    {pick ? (
+                      <div className="text-right">
+                        <div className="font-semibold text-sm">{pick.teamName}</div>
+                        <div className="text-xs text-gray-500">
+                          Rd {pick.round}, Pick #{pick.pickNumber}
+                          {pick.wasAutoPick && <span className="text-orange-600 ml-1">(auto)</span>}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-gray-300 text-sm">—</span>
+                    )}
                   </div>
-                </div>
-              ))}
-              {draftState.picks.filter(p => p.userId === user?.id).length === 0 && (
-                <p className="p-4 text-gray-400 text-center text-sm">No teams drafted yet</p>
-              )}
+                );
+              })}
             </div>
           </div>
         </div>

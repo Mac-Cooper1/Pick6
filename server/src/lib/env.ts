@@ -10,6 +10,7 @@ interface EnvConfig {
   NODE_ENV: 'development' | 'production' | 'test';
   CORS_ORIGIN: string;
   ODDS_API_KEY?: string;
+  ADMIN_SECRET?: string;
   ESPN_GROUP_ID: string;
 }
 
@@ -64,11 +65,16 @@ export function validateEnv(): EnvConfig {
   const NODE_ENV = getOptionalEnv('NODE_ENV', 'development') as EnvConfig['NODE_ENV'];
   const CORS_ORIGIN = getOptionalEnv('CORS_ORIGIN', '*');
   const ODDS_API_KEY = process.env.ODDS_API_KEY;
+  const ADMIN_SECRET = process.env.ADMIN_SECRET;
   const ESPN_GROUP_ID = getOptionalEnv('ESPN_GROUP_ID', '80'); // 80 = FBS
 
   // Warn about optional but recommended vars
   if (!ODDS_API_KEY) {
     console.warn('⚠️  ODDS_API_KEY not set - upset detection will not work automatically');
+  }
+
+  if (!ADMIN_SECRET && NODE_ENV === 'production') {
+    console.warn('⚠️  ADMIN_SECRET not set - scheduled syncs (GitHub Actions) cannot authenticate');
   }
 
   console.log('✅ Environment variables validated');
@@ -80,6 +86,7 @@ export function validateEnv(): EnvConfig {
     NODE_ENV,
     CORS_ORIGIN,
     ODDS_API_KEY,
+    ADMIN_SECRET,
     ESPN_GROUP_ID,
   };
 }

@@ -6,8 +6,8 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
-  login: (email: string) => Promise<void>;
-  register: (name: string, email: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -42,13 +42,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.setItem('pick6_user', JSON.stringify(authResponse.user));
   };
 
-  const login = async (email: string) => {
-    const response = await authApi.login(email);
+  const login = async (email: string, password: string) => {
+    const response = await authApi.login(email, password);
     handleAuthSuccess(response);
   };
 
-  const register = async (name: string, email: string) => {
-    const response = await authApi.register(name, email);
+  const register = async (name: string, email: string, password: string) => {
+    const response = await authApi.register(name, email, password);
     handleAuthSuccess(response);
   };
 

@@ -9,6 +9,7 @@ import prisma from '../lib/prisma';
 import cacheService, { CACHE_TTL } from './cacheService';
 import { fetchScoreboard, parseScoreboardGames, ParsedGame } from './espnClient';
 import { fetchNCAAFOdds, isOddsApiConfigured } from './oddsClient';
+import { getCurrentWeek } from './seasonService';
 
 // Normalize team names for matching
 export function normalizeTeamName(name: string): string {
@@ -19,22 +20,6 @@ export function normalizeTeamName(name: string): string {
     .replace(/university$/, '')
     .replace(/^the/, '');
 }
-
-// Common name variations mapping
-const NAME_ALIASES: Record<string, string[]> = {
-  'lsu': ['louisiana state', 'lsu tigers'],
-  'usc': ['southern california', 'trojans'],
-  'ucf': ['central florida', 'ucf knights'],
-  'smu': ['southern methodist'],
-  'tcu': ['texas christian'],
-  'byu': ['brigham young'],
-  'ole miss': ['mississippi', 'rebels'],
-  'pitt': ['pittsburgh'],
-  'miami': ['miami (fl)', 'miami florida', 'miami hurricanes'],
-  'miami (oh)': ['miami ohio', 'redhawks'],
-  'texas a&m': ['texas am', 'aggies'],
-  'uconn': ['connecticut'],
-};
 
 interface MatchupOdds {
   spread: number | null;
@@ -197,11 +182,9 @@ function findGameForTeam(
   if (espnId) {
     for (const game of games) {
       if (game.homeTeam.espnId === espnId) {
-        console.log(`[Matchup] ESPN ID match: ${teamName} (${espnId}) -> ${game.homeTeam.displayName} vs ${game.awayTeam.displayName}`);
         return { game, isHome: true };
       }
       if (game.awayTeam.espnId === espnId) {
-        console.log(`[Matchup] ESPN ID match: ${teamName} (${espnId}) -> ${game.awayTeam.displayName} @ ${game.homeTeam.displayName}`);
         return { game, isHome: false };
       }
     }
@@ -213,11 +196,9 @@ function findGameForTeam(
     const awayNorm = normalizeTeamName(game.awayTeam.displayName);
 
     if (teamsMatch(normalizedTeamName, homeNorm)) {
-      console.log(`[Matchup] Name match: ${teamName} -> ${game.homeTeam.displayName} (home) vs ${game.awayTeam.displayName}`);
       return { game, isHome: true };
     }
     if (teamsMatch(normalizedTeamName, awayNorm)) {
-      console.log(`[Matchup] Name match: ${teamName} -> ${game.awayTeam.displayName} (away) @ ${game.homeTeam.displayName}`);
       return { game, isHome: false };
     }
   }
@@ -229,11 +210,9 @@ function findGameForTeam(
     const awayAbbr = game.awayTeam.abbreviation.toLowerCase();
 
     if (teamLower === homeAbbr || normalizedTeamName === homeAbbr) {
-      console.log(`[Matchup] Abbr match: ${teamName} -> ${game.homeTeam.displayName} (home)`);
       return { game, isHome: true };
     }
     if (teamLower === awayAbbr || normalizedTeamName === awayAbbr) {
-      console.log(`[Matchup] Abbr match: ${teamName} -> ${game.awayTeam.displayName} (away)`);
       return { game, isHome: false };
     }
   }
@@ -303,7 +282,6 @@ export async function getRosterMatchups(
     throw new Error('League not found');
   }
 
-  const week = weekNumber || league.currentWeek;
   let seasonYear = league.seasonYear;
 
   // Check if we need to use current season instead of configured season
@@ -327,12 +305,15 @@ export async function getRosterMatchups(
   const isJanuary = currentMonth === 0;
   const isBowlSeason = isLateDecember || isJanuary;
 
-  // Get user's roster
-  const rosterTeams = await prisma.rosterTeam.findMany({
+  // Week comes from the ESPN-derived calendar (D6), not a stored counter
+  const week = weekNumber || (await getCurrentWeek(seasonYear));
+
+  // Get user's current roster
+  const rosterSlots = await prisma.rosterSlot.findMany({
     where: {
       leagueId,
       userId,
-      droppedAt: null,
+      toWeek: null,
     },
     include: {
       team: true,
@@ -429,7 +410,7 @@ export async function getRosterMatchups(
   }
 
   // Build matchup data for each rostered team
-  const matchups: TeamMatchup[] = rosterTeams.map((rt) => {
+  const matchups: TeamMatchup[] = rosterSlots.map((rt) => {
     const team = rt.team;
     const gameMatch = findGameForTeam(team.name, team.espnTeamId, games || []);
 

@@ -220,8 +220,14 @@ export function matchGameToOdds(
 }
 
 /**
+ * League rule: upset modifiers only apply at a spread of 3.5 or more —
+ * a +3.5-or-greater underdog winning pays +2, a -3.5-or-greater favorite
+ * losing pays -1. Smaller spreads (and pick'ems) score as regular results.
+ */
+export const UPSET_SPREAD_THRESHOLD = 3.5;
+
+/**
  * Determine if a game result was an upset based on spread
- * An upset occurs when the underdog wins (team with positive spread wins)
  */
 export function wasUpset(
   winnerIsHome: boolean,
@@ -229,6 +235,10 @@ export function wasUpset(
 ): boolean {
   if (spread === null) {
     // No spread data available, can't determine upset
+    return false;
+  }
+
+  if (Math.abs(spread) < UPSET_SPREAD_THRESHOLD) {
     return false;
   }
 
