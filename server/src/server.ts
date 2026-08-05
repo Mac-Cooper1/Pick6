@@ -3,6 +3,8 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 import { errorHandler } from './middleware/errorHandler';
 import { validateEnv } from './lib/env';
 import { testDatabaseConnection, disconnectPrisma } from './lib/prisma';
@@ -65,6 +67,21 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/rosters', rosterRoutes);
 app.use('/api/cfb', cfbRoutes);
 app.use('/api/odds', oddsRoutes);
+
+// Single-service deployment: serve the built client from the same origin
+// (kills CORS and build-time API URLs entirely). The client build lives at
+// ../client/dist relative to the repo; CLIENT_DIST overrides if needed.
+const clientDist = process.env.CLIENT_DIST || path.resolve(__dirname, '../../client/dist');
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  // SPA fallback for deep links (/league/:id etc.) — API and health keep
+  // falling through to the JSON 404 below
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') return next();
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+  console.log(`🖥️  Serving client from ${clientDist}`);
+}
 
 // 404 handler
 app.use((req, res) => {

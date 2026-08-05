@@ -93,7 +93,7 @@ Leaves an inspectable "Smoke League" — sign in as `smoke1@test.local` / `smoke
 | `CORS_ORIGIN` | prod | exact client origin |
 | `PORT` / `NODE_ENV` / `ESPN_GROUP_ID` | no | defaults `3001` / `development` / `80` (FBS) |
 
-**Client**: `VITE_API_URL` (production builds only; dev uses the Vite proxy).
+**Client**: none required — the app is same-origin in dev (Vite proxy) and in production (the server serves the built client). `VITE_API_URL` exists only as an override for split client/API deployments.
 
 ## Scheduled Scoring
 
@@ -141,7 +141,7 @@ pick6/
 
 ## Deployment
 
-Target: **Render** (server ~$7/mo Starter + Postgres ~$6/mo Basic) + **Vercel** (client) + GitHub Actions cron. Full runbook: [LAUNCH_PLAN.md](LAUNCH_PLAN.md) → WS9. Key facts: `prisma migrate deploy` is the only migrate command that touches prod; Render free Postgres expires after 30 days (don't); the client needs an SPA rewrite for deep links.
+**Single service on Render** (`render.yaml` blueprint): one web service (~$7/mo Starter) runs the Express API *and* serves the built client from the same origin — no CORS, no build-time API URLs, one URL to share — plus managed Postgres (~$6/mo Basic) and the GitHub Actions cron. Full runbook: [LAUNCH_PLAN.md](LAUNCH_PLAN.md) → WS9. Key facts: `prisma migrate deploy` is the only migrate command that touches prod (the blueprint runs it pre-deploy); Render free Postgres expires after 30 days (never use it); Render's `NODE_ENV=production` makes `npm ci` skip devDependencies, so the build commands use `--include=dev`.
 
 ## Changelog
 
@@ -156,5 +156,8 @@ Target: **Render** (server ~$7/mo Starter + Postgres ~$6/mo Basic) + **Vercel** 
 - **2026 data (WS7)**: seed now pulls conference membership live from ESPN's core API (138 FBS teams; realignment = re-run the seed, not a code change); `oddsApiName` populated for exact spread matching; 4 missing FBS teams (Delaware, Missouri St, …) self-healed from FCS stubs; `RULES.md` added as the game spec
 - **Tabs finished (WS6)**: new **Leaderboard** (default) and **Week by Week** tabs — full season grid with per-week, per-team drill-down (result, score, spread, upset badge); production builds now fail loudly if `VITE_API_URL` is missing instead of silently pointing at localhost; real favicon
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
-- **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), `client/vercel.json` SPA rewrite, CORS `credentials` flag removed (Bearer auth needs none)
+- **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Aug 5, 2026** — Single-service deployment:
+- Consolidated onto **one Render service**: Express now serves the built client (`client/dist`) with an SPA fallback, so the app is fully same-origin in production — the CORS/`VITE_API_URL` failure class is gone by construction. Client defaults to relative URLs (`VITE_API_URL` is now only a split-deploy override); `render.yaml` rebuilt for the combined build; `vercel.json` removed (Vercel retired — the old Render service from December ran pre-rebuild code against a deleted Supabase DB and is being replaced by the blueprint)

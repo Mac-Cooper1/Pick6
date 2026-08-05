@@ -125,17 +125,21 @@ Boundaries are irregular — **never compute them; ingest them**:
 - Backups: Render paid Postgres = daily snapshots (verify retention in dashboard). Before risky migrations: manual snapshot.
 - Data size is trivial (~136 teams, ~800 games, 10 users) — no pooling/scaling concerns; default Prisma settings fine.
 
-**Pre-staged Aug 4 (deploy day is now: click, paste env, push):**
-- [x] `render.yaml` blueprint at repo root — creates `pick6-api` (Starter, health check, `preDeployCommand: prisma migrate deploy`) + `pick6-db` (Basic — **never free tier: 30-day expiry then deletion**); auto-generates `JWT_SECRET` + `ADMIN_SECRET`
-- [x] `client/vercel.json` SPA rewrite for `/league/:id` deep links
-- [x] CORS fixed: `credentials` flag removed entirely (auth is Bearer-token, no cookies) — `'*'` legal in dev, exact origin in prod
+**Pre-staged Aug 4, revised Aug 5 → single-service on Render:**
+- [x] Express serves `client/dist` with an SPA fallback → client + API share **one origin, one URL** (no CORS, no `VITE_API_URL`, the whole failure class gone). Verified locally: `/` and `/league/:id` serve the app, `/api/*` + `/health` stay JSON, same-origin login works
+- [x] `render.yaml` rebuilt: one `pick6` web service (Starter, health check, combined server+client build with `npm ci --include=dev` — Render's `NODE_ENV=production` skips devDeps otherwise, `preDeployCommand: prisma migrate deploy`) + `pick6-db` (Basic — **never free tier: 30-day expiry then deletion**); auto-generates `JWT_SECRET` + `ADMIN_SECRET`
+- [x] Vercel retired: `vercel.json` deleted; client defaults to same-origin relative URLs (`VITE_API_URL` kept only as a split-deploy override)
+- [x] CORS `credentials` flag removed (Bearer auth, no cookies) — now moot anyway on a single origin
 
-**Deploy day checklist:**
-- [ ] Render → New → Blueprint → this repo; then set `ODDS_API_KEY` + `CORS_ORIGIN` (Vercel origin) in the dashboard
-- [ ] Vercel: import `client/`, set `VITE_API_URL` (build fails loudly if missing — by design)
-- [ ] Seed once from laptop: `DATABASE_URL=<external-url> npm run prisma:seed`
-- [ ] GitHub repo secrets `API_URL` + `ADMIN_SECRET` → scheduled syncs go live (test via workflow_dispatch)
-- [ ] Smoke: register 2 accounts → create league → live 2-player draft → Sync Now → confirm socket draft works Vercel ↔ Render
+**Deploy-day findings (Aug 5):** the rebuild is merged (PR #1) and old deployments from December exist on both sides. **Vercel is healthy**: repo-connected, auto-built the new client, stable prod domain `https://pick6-m3r4.vercel.app` (deployment-hash URLs are SSO-gated for anyone but the owner — always share the stable domain). **Render `pick6-r5q0` is a corpse**: still serving pre-rebuild December code (new deploys either off or failing) and its `DATABASE_URL` points at a deleted/paused Supabase project (`FATAL: tenant/user postgres.ccxbnlfjnhyrajiurtlc not found`). Path chosen: apply the `render.yaml` Blueprint (fresh `pick6-api` + `pick6-db`), then update Vercel's `VITE_API_URL` to the new API URL and delete the old service.
+
+**Deploy day checklist (single-service):**
+- [ ] Push the single-service change to `main` (Render builds from GitHub)
+- [ ] Render → New → **Blueprint** → this repo → apply; then paste `ODDS_API_KEY` in the service's Environment tab
+- [ ] Seed once from laptop: `cd server && DATABASE_URL='<pick6-db external URL>' npm run prisma:seed`
+- [ ] GitHub repo secrets `API_URL` (the new service URL) + `ADMIN_SECRET` (copy from Render env) → run the sync workflow once via workflow_dispatch to confirm
+- [ ] Delete the old `pick6-r5q0` Render service and the Vercel project (Settings → Delete) — nothing may keep pointing at the dead Supabase URL
+- [ ] Smoke on the new URL: register 2 accounts → create league → live 2-player draft (sockets same-origin) → Sync Now
 - [ ] **Dress rehearsal Aug 27–29:** real Week 1 games in a test league — odds land pre-kickoff, scores finalize, ±3.5 upsets flag
 
 ### WS10 — Hardening (launch-relevant items done Aug 4)

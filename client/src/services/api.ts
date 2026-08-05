@@ -14,13 +14,10 @@ import type {
   ErrorResponse,
 } from '../types';
 
-// In development, use relative URL so Vite proxy works
-// In production, VITE_API_URL is REQUIRED at build time — fail loudly rather
-// than shipping a bundle that silently points at localhost
-const API_URL = import.meta.env.PROD ? (import.meta.env.VITE_API_URL || '') : '';
-if (import.meta.env.PROD && !API_URL) {
-  throw new Error('VITE_API_URL must be set at build time for production builds');
-}
+// Same-origin by default: in dev the Vite proxy forwards /api, and in
+// production the Express server serves this bundle itself (single-service
+// deploy). VITE_API_URL exists only as an override for split deployments.
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Create axios instance
 const api = axios.create({

@@ -1,24 +1,26 @@
-# Render blueprint (WS9). Creates the API service + Postgres in one step:
-# Render dashboard → New → Blueprint → point at this repo.
+# Render blueprint — single-service deployment (WS9, revised Aug 5).
+# One web service runs the Express API *and* serves the built client from the
+# same origin — no CORS, no build-time API URLs, one URL to share.
 #
+# Setup: Render dashboard → New → Blueprint → point at this repo.
 # After the first deploy:
 #   1. Set ODDS_API_KEY on the service (dashboard → Environment).
-#   2. Copy the generated ADMIN_SECRET into a GitHub Actions repo secret,
-#      along with API_URL (the service's public URL) — that activates the
-#      scheduled sync workflow.
-#   3. Set CORS_ORIGIN to the deployed client origin (e.g. the Vercel URL).
-#   4. Seed once from your laptop against the External URL:
-#        DATABASE_URL=<external-url> npx prisma migrate deploy   (or let preDeploy do it)
-#        DATABASE_URL=<external-url> npm run prisma:seed
+#   2. Copy the generated ADMIN_SECRET + the service URL into GitHub Actions
+#      repo secrets (ADMIN_SECRET, API_URL) — that activates scheduled syncs.
+#   3. Seed once from your laptop against pick6-db's External URL:
+#        cd server && DATABASE_URL='<external-url>' npm run prisma:seed
+#
+# npm note: Render exports NODE_ENV=production, which makes plain `npm ci`
+# skip devDependencies — but the build needs prisma/vite/typescript, so both
+# installs use --include=dev.
 services:
   - type: web
-    name: pick6-api
+    name: pick6
     runtime: node
     plan: starter # always-on: required for live draft sockets
-    rootDir: server
-    buildCommand: npm ci && npx prisma generate && npm run build
-    preDeployCommand: npx prisma migrate deploy
-    startCommand: npm start
+    buildCommand: cd server && npm ci --include=dev && npx prisma generate && npm run build && cd ../client && npm ci --include=dev && npm run build
+    preDeployCommand: cd server && npx prisma migrate deploy
+    startCommand: cd server && npm start
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
@@ -31,10 +33,9 @@ services:
         generateValue: true
       - key: NODE_ENV
         value: production
-      - key: CORS_ORIGIN
-        sync: false # set to the client origin after the client deploys
       - key: ODDS_API_KEY
         sync: false # paste your key in the dashboard
+      # CORS_ORIGIN intentionally unset — client and API share one origin
 
 databases:
   - name: pick6-db

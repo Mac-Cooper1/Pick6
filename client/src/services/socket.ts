@@ -7,9 +7,9 @@
 import { io, Socket } from 'socket.io-client';
 import type { ConferenceSlot } from '../types';
 
-// Socket URL - in dev use relative path for proxy, in prod use API URL
-// (api.ts already throws at load time if VITE_API_URL is missing in prod)
-const SOCKET_URL = import.meta.env.PROD ? (import.meta.env.VITE_API_URL || '') : '';
+// Same-origin by default (dev: Vite ws proxy; prod: the server serves this
+// bundle). VITE_API_URL is only an override for split deployments.
+const SOCKET_URL = import.meta.env.VITE_API_URL || '';
 
 // Draft state types
 export interface DraftPick {
@@ -97,14 +97,15 @@ export function connectToDraft(
     socket.disconnect();
   }
 
-  // Create new socket connection
-  socket = io(SOCKET_URL, {
+  // Create new socket connection (no URL = current origin)
+  const socketOptions = {
     auth: { token },
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionAttempts: 10,
-  });
+  };
+  socket = SOCKET_URL ? io(SOCKET_URL, socketOptions) : io(socketOptions);
 
   // Connection handlers
   socket.on('connect', () => {
