@@ -132,7 +132,7 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
                 onChange={(e) => setMaxPlayers(parseInt(e.target.value))}
                 className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
               >
-                {[8, 9, 10, 11, 12].map((n) => (
+                {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((n) => (
                   <option key={n} value={n}>
                     {n} Players
                   </option>

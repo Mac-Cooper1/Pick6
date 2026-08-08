@@ -25,8 +25,10 @@ export async function createLeague(req: AuthRequest, res: Response, next: any) {
       throw new AppError('League name must be between 1 and 50 characters', 400);
     }
 
-    if (maxPlayers < 8 || maxPlayers > 12) {
-      throw new AppError('Max players must be between 8 and 12', 400);
+    // Cap at 16: SEC and Big 12 have exactly 16 teams, so a 16-player league
+    // fully drains those slots — any more and someone can't fill a roster
+    if (maxPlayers < 4 || maxPlayers > 16) {
+      throw new AppError('Max players must be between 4 and 16', 400);
     }
 
     // Generate or validate join code
