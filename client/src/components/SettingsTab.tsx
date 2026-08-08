@@ -24,7 +24,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   // Draft settings state
   const [draftDate, setDraftDate] = useState('');
   const [draftTime, setDraftTime] = useState('');
-  const [pickDeadline, setPickDeadline] = useState(60);
+  const [pickDeadline, setPickDeadline] = useState(90);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);

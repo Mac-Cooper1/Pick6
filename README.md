@@ -159,6 +159,14 @@ pick6/
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
 
+**Aug 7, 2026** — QA round 1 (first real draft + league-page review):
+- **Draft room**: clock header is now sticky (follows you while browsing teams); clear-× buttons on both search inputs; **timeout now drafts your selected team** — while you're on the clock, your selection is pinned to the front of your queue so autopick takes exactly it, with an inline hint; default pick clock 60s → **90s** (migration `20260807000000`; existing leagues keep their setting)
+- **League tab shows spreads, not moneylines** (the league scores off spreads): color-coded — green at +3.5+ (upset-bonus territory), red at −3.5+ (bust risk) — plus an explicit "no line yet" state
+- **Missing-odds investigation**: games without lines (FBS-vs-FCS blowouts, e.g. Georgia–Tennessee State) are books not posting yet, not a pipeline bug — the daily cron re-syncs odds until kickoff, and BYU–Utah Tech already carries −48.5 locally; a permanently line-less game correctly scores as a regular result
+- **Week by Week**: long team names/opponents wrap instead of truncating (result badge stays pinned)
+- **Scoring copy**: legend + RULES.md now say explicitly that outcomes are mutually exclusive — an upset win is 2 points *total*, not 1+2 (the code always worked this way; smoke-verified)
+- `NOTES.md` added: design backlog (mobile overhaul) + V2 ideas (best-available ordering with team rankings)
+
 **Aug 5, 2026** — League size for testing:
 - League `maxPlayers` range widened from 8–12 to **4–16** (server validation + create form). 16 is the hard ceiling — SEC and Big 12 have exactly 16 teams each. Drafts still start with as few as 2 joined members regardless of the cap.
 

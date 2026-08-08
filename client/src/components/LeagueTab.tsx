@@ -7,10 +7,12 @@ interface LeagueTabProps {
   leagueId: number;
 }
 
-// Helper to format moneyline odds
-function formatMoneyline(ml: number | null | undefined): string {
-  if (ml === null || ml === undefined) return '';
-  return ml > 0 ? `+${ml}` : `${ml}`;
+// Format a team-relative spread (+3.5 = underdog by 3.5). The league scores
+// off spreads, not moneylines, so that's what we surface.
+function formatSpread(spread: number | null | undefined): string {
+  if (spread === null || spread === undefined) return '';
+  if (spread === 0) return 'PK';
+  return spread > 0 ? `+${spread}` : `${spread}`;
 }
 
 export function LeagueTab({ leagueId }: LeagueTabProps) {
@@ -151,8 +153,8 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                       opponentDisplay = 'Season Over';
                     }
 
-                    // Get moneyline for display
-                    const moneyline = odds?.teamMoneyline;
+                    // Team-relative spread (drives the ±3.5 scoring modifiers)
+                    const teamSpread = odds?.teamSpread;
 
                     return (
                       <div
@@ -183,19 +185,31 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                               >
                                 {opponentDisplay}
                               </span>
-                              {game && moneyline !== null && moneyline !== undefined && (
-                                <span
-                                  className={`text-sm font-medium ${
-                                    moneyline > 0
-                                      ? 'text-green-600'
-                                      : moneyline < 0
-                                      ? 'text-gray-600'
-                                      : 'text-gray-500'
-                                  }`}
-                                >
-                                  {formatMoneyline(moneyline)}
-                                </span>
-                              )}
+                              {game &&
+                                (teamSpread !== null && teamSpread !== undefined ? (
+                                  <span
+                                    className={`text-sm font-medium ${
+                                      teamSpread >= 3.5
+                                        ? 'text-green-600' // upset-bonus territory (+2 on a win)
+                                        : teamSpread <= -3.5
+                                        ? 'text-red-500' // bust risk (−1 on a loss)
+                                        : 'text-gray-600'
+                                    }`}
+                                    title={
+                                      teamSpread >= 3.5
+                                        ? 'Underdog of 3.5+ — a win scores 2'
+                                        : teamSpread <= -3.5
+                                        ? 'Favorite by 3.5+ — a loss scores −1'
+                                        : 'Inside the ±3.5 window — regular scoring'
+                                    }
+                                  >
+                                    {formatSpread(teamSpread)}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-gray-400 italic" title="Books haven't posted a line yet — odds re-sync daily until kickoff">
+                                    no line yet
+                                  </span>
+                                ))}
                             </div>
                           </div>
                         )}

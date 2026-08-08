@@ -239,6 +239,32 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     socketUpdateQueue(leagueId, newQueue);
   };
 
+  // Clear the search box + current selection
+  const clearSelection = () => {
+    setSearchTerm('');
+    setSelectedTeam(null);
+  };
+
+  // Timeout protection: while it's your turn, your selected team is silently
+  // pinned to the front of your queue — if the clock hits zero, autopick
+  // drafts exactly that team instead of "best available".
+  const autoQueuedRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (draftState?.onTheClockUserId !== user?.id) return;
+    const sel = selectedTeam?.id ?? null;
+    const prev = autoQueuedRef.current;
+    if (sel === prev) return;
+
+    let newQueue = queue.filter((id) => id !== prev && id !== sel);
+    if (sel !== null) {
+      newQueue = [sel, ...newQueue];
+    }
+    autoQueuedRef.current = sel;
+    setQueue(newQueue);
+    socketUpdateQueue(leagueId, newQueue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTeam, draftState?.onTheClockUserId, user?.id, queue, leagueId]);
+
   const handleRemoveFromQueue = (teamId: number) => {
     const newQueue = queue.filter(id => id !== teamId);
     setQueue(newQueue);
@@ -454,8 +480,8 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
   // Render LIVE draft
   return (
     <div className="p-4 space-y-4">
-      {/* Header with Timer */}
-      <div className={`bg-white rounded-lg shadow p-4 ${isMyTurn ? 'ring-2 ring-green-500' : ''}`}>
+      {/* Header with Timer — sticky so the clock follows you down the page */}
+      <div className={`sticky top-0 z-30 bg-white rounded-lg shadow-md p-4 ${isMyTurn ? 'ring-2 ring-green-500' : ''}`}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
@@ -509,6 +535,11 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
               <p className="text-xs text-green-700 mb-3">
                 Open slots:{' '}
                 {DRAFT_SLOTS.filter(s => !isSlotFilledForMe(s)).map(s => SLOT_LABELS[s]).join(', ')}
+                {selectedTeam && (
+                  <span className="block mt-0.5 text-green-600">
+                    ⏱ If the clock hits zero, <strong>{selectedTeam.name}</strong> is drafted automatically.
+                  </span>
+                )}
               </p>
               <div className="flex gap-2">
                 <div className="flex-1 relative">
@@ -520,8 +551,17 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                       setSearchTerm(e.target.value);
                       setSelectedTeam(null);
                     }}
-                    className="w-full p-3 border-2 border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full p-3 pr-9 border-2 border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                   />
+                  {searchTerm && (
+                    <button
+                      onClick={clearSelection}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                      title="Clear search and selection"
+                    >
+                      ×
+                    </button>
+                  )}
                   {searchTerm && filteredTeams.length > 0 && !selectedTeam && (
                     <div className="absolute z-20 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg">
                       {filteredTeams.slice(0, 15).map(team => {
@@ -637,13 +677,24 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <div className="bg-gray-100 p-3 flex flex-wrap justify-between items-center gap-2">
               <h3 className="font-bold text-gray-800">Available Teams ({filteredTeams.length})</h3>
-              <input
-                type="text"
-                placeholder="Filter..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="px-3 py-1 border rounded text-sm w-40"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Filter..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="px-3 py-1 pr-7 border rounded text-sm w-40"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={clearSelection}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-sm"
+                    title="Clear search and selection"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
             {/* Slot filter chips */}
             <div className="px-3 py-2 border-b flex flex-wrap gap-2">
