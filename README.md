@@ -159,5 +159,8 @@ pick6/
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
 
+**Aug 5, 2026** — League size for testing:
+- League `maxPlayers` range widened from 8–12 to **4–16** (server validation + create form). 16 is the hard ceiling — SEC and Big 12 have exactly 16 teams each. Drafts still start with as few as 2 joined members regardless of the cap.
+
 **Aug 5, 2026** — Single-service deployment:
 - Consolidated onto **one Render service**: Express now serves the built client (`client/dist`) with an SPA fallback, so the app is fully same-origin in production — the CORS/`VITE_API_URL` failure class is gone by construction. Client defaults to relative URLs (`VITE_API_URL` is now only a split-deploy override); `render.yaml` rebuilt for the combined build; `vercel.json` removed (Vercel retired — the old Render service from December ran pre-rebuild code against a deleted Supabase DB and is being replaced by the blueprint)
