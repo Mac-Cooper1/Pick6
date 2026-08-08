@@ -101,11 +101,11 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <div className="font-semibold text-green-600">+1 point</div>
-              <div className="text-gray-600">Win</div>
+              <div className="text-gray-600">Win (favorite, small underdog, or no line)</div>
             </div>
             <div>
               <div className="font-semibold text-green-700">+2 points</div>
-              <div className="text-gray-600">Win as +3.5 or more underdog</div>
+              <div className="text-gray-600">Win as a +3.5-or-more underdog</div>
             </div>
             <div>
               <div className="font-semibold text-gray-600">0 points</div>
@@ -113,9 +113,13 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
             </div>
             <div>
               <div className="font-semibold text-red-600">−1 point</div>
-              <div className="text-gray-600">Loss as −3.5 or more favorite</div>
+              <div className="text-gray-600">Loss as a −3.5-or-more favorite</div>
             </div>
           </div>
+          <p className="mt-3 text-xs text-gray-500">
+            Each team scores exactly one of these per week — an upset win is 2 points total
+            (not 1&nbsp;+&nbsp;2), and an upset loss is −1 total.
+          </p>
         </div>
       </div>
     </div>

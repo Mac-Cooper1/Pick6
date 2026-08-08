@@ -21,7 +21,9 @@ No two players in a league can roster the same team. The draft is a **live snake
 | Loss | 0 |
 | Loss as favorite of **−3.5 or more** | −1 |
 
-Favorite/underdog comes from the pre-game betting line. Spreads smaller than 3.5 (and pick'ems) score as regular wins/losses. Postponed or cancelled games score 0.
+Favorite/underdog comes from the pre-game betting line. Spreads smaller than 3.5 (and pick'ems) score as regular wins/losses, and a game with no posted line scores as a regular result. Postponed or cancelled games score 0.
+
+Each team scores **exactly one** of the four outcomes per week — the values don't stack. An underdog win is worth 2 points total (not 1&nbsp;+&nbsp;2).
 
 ## The Season
 

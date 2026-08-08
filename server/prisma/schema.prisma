@@ -37,7 +37,7 @@ model League {
   // Draft configuration (set by commissioner)
   draftScheduledAt    DateTime?   // When draft is scheduled to begin (UTC)
   draftStatus         DraftStatus @default(NOT_STARTED)
-  pickDeadlineSeconds Int         @default(60)
+  pickDeadlineSeconds Int         @default(90)
 
   // Draft state (runtime)
   draftStarted        Boolean   @default(false)

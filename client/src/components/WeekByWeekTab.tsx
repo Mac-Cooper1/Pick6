@@ -177,17 +177,17 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
                     {member.teams.map((team) => (
                       <div key={team.teamId} className="bg-gray-50 rounded p-2 text-xs">
                         <div className="text-gray-400 mb-0.5">{team.slotLabel}</div>
-                        <div className="font-semibold text-sm truncate">{team.teamName}</div>
-                        <div className="flex items-center justify-between mt-1">
-                          <span className="text-gray-500 truncate">
+                        <div className="font-semibold text-sm leading-tight break-words">{team.teamName}</div>
+                        <div className="flex items-start justify-between gap-1 mt-1">
+                          <span className="text-gray-500 break-words leading-tight min-w-0">
                             {team.opponent ? `vs ${team.opponent}` : 'no game'}
                             {team.teamSpread !== null && (
-                              <span className="ml-1 text-gray-400">
+                              <span className="ml-1 text-gray-400 whitespace-nowrap">
                                 ({team.teamSpread > 0 ? '+' : ''}{team.teamSpread})
                               </span>
                             )}
                           </span>
-                          {resultBadge(team)}
+                          <span className="shrink-0">{resultBadge(team)}</span>
                         </div>
                         {team.scoreLine && (
                           <div className="mt-1 flex items-center justify-between">
