@@ -19,6 +19,7 @@ import {
   DraftState,
 } from '../services/socket';
 import { ErrorMessage } from './ErrorMessage';
+import { Button } from './Button';
 import { Team, ConferenceSlot, DRAFT_SLOTS, SLOT_LABELS } from '../types';
 
 interface DraftRoomProps {
@@ -337,7 +338,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
   // Render loading state
   if (!draftState) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-center py-12">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-600 mb-4"></div>
           <p className="text-gray-600">Connecting to draft room...</p>
@@ -350,9 +351,9 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
   // Render pre-draft state
   if (draftState.draftStatus === 'NOT_STARTED' || draftState.draftStatus === 'SCHEDULED') {
     return (
-      <div className="p-6">
-        <div className="bg-white rounded-lg shadow p-8 text-center">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">Draft Room</h2>
+      <div className="p-4 sm:p-6">
+        <div className="bg-white rounded-lg shadow p-6 sm:p-8 text-center">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4">Draft Room</h2>
 
           <div className="mb-6">
             <span className={`inline-block px-4 py-2 rounded-full font-semibold ${
@@ -391,12 +392,9 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
           </div>
 
           {isCommissioner && draftState.draftStatus !== 'SCHEDULED' && (
-            <button
-              onClick={handleStartDraft}
-              className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
-            >
+            <Button size="lg" onClick={handleStartDraft}>
               Start Draft Now
-            </button>
+            </Button>
           )}
 
           {draftState.draftStatus === 'SCHEDULED' && (
@@ -420,9 +418,9 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
   // Render complete state
   if (draftState.draftStatus === 'COMPLETE') {
     return (
-      <div className="p-6">
-        <div className="bg-white rounded-lg shadow p-8 text-center mb-6">
-          <h2 className="text-2xl font-bold text-green-800 mb-4">Draft Complete!</h2>
+      <div className="p-4 sm:p-6">
+        <div className="bg-white rounded-lg shadow p-6 sm:p-8 text-center mb-6">
+          <h2 className="text-xl sm:text-2xl font-bold text-green-800 mb-4">Draft Complete!</h2>
           <p className="text-gray-600">All teams have been drafted. See the Draft Recap tab for rosters by slot.</p>
         </div>
 
@@ -437,7 +435,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                 <tr>
                   <th className="p-3 text-left text-gray-600 font-semibold">Round</th>
                   {draftState.members.map(member => (
-                    <th key={member.userId} className="p-3 text-left text-gray-600 font-semibold">
+                    <th key={member.userId} className="p-3 text-left text-gray-600 font-semibold min-w-[9rem] whitespace-nowrap">
                       {member.name}
                     </th>
                   ))}
@@ -479,58 +477,72 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
   // Render LIVE draft
   return (
-    <div className="p-4 space-y-4">
-      {/* Header with Timer — sticky so the clock follows you down the page */}
-      <div className={`sticky top-0 z-30 bg-white rounded-lg shadow-md p-4 ${isMyTurn ? 'ring-2 ring-green-500' : ''}`}>
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
+    <div className="p-3 sm:p-4 space-y-3 sm:space-y-4">
+      {/* Header with Timer — sticky so the clock follows you down the page.
+          One row at every width so it never grows past ~70px on a phone. */}
+      <div className={`sticky top-0 z-30 bg-white rounded-lg shadow-md px-3 py-2 sm:p-4 ${isMyTurn ? 'ring-2 ring-green-500' : ''}`}>
+        <div className="flex items-center justify-between gap-3 sm:gap-4">
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="inline-block w-3 h-3 bg-red-500 rounded-full animate-pulse"></span>
+              <span className="inline-block w-2.5 h-2.5 sm:w-3 sm:h-3 bg-red-500 rounded-full animate-pulse"></span>
               <span className="font-bold text-red-600">LIVE</span>
+              {/* Connection status — dot only on phones, dot + label from sm up */}
+              <span
+                className="flex items-center gap-1 text-xs text-gray-400"
+                title={isConnected ? 'Connected' : 'Reconnecting...'}
+              >
+                <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
+                <span className="hidden sm:inline">{isConnected ? 'Connected' : 'Reconnecting...'}</span>
+              </span>
             </div>
-            <p className="text-gray-600 text-sm mt-1">
+            <p className="text-gray-600 text-xs sm:text-sm mt-0.5 sm:mt-1 whitespace-nowrap">
               Pick {draftState.currentPickNumber} of {draftState.totalPicks}
-              {' '}(Round {draftState.currentRound})
+              <span className="hidden sm:inline">{' '}(Round {draftState.currentRound})</span>
+              <span className="sm:hidden">{' '}· Rd {draftState.currentRound}</span>
             </p>
           </div>
 
           {/* Timer */}
-          <div className="text-center">
-            <div className={`text-4xl font-mono font-bold ${
+          <div className="text-center shrink-0">
+            <div className={`text-3xl sm:text-4xl leading-none font-mono font-bold tabular-nums ${
               timeRemaining < 10000 ? 'text-red-600 animate-pulse' : 'text-green-700'
             }`}>
               {formatTime(timeRemaining)}
             </div>
-            <p className="text-sm text-gray-500">Time Remaining</p>
+            <p className="text-[11px] sm:text-sm text-gray-500 mt-1">Time Remaining</p>
           </div>
 
           {/* On the Clock */}
-          <div className="text-right">
-            <p className="text-sm text-gray-500">On the Clock</p>
-            <p className={`text-xl font-bold ${isMyTurn ? 'text-green-600' : 'text-gray-800'}`}>
-              {isMyTurn ? "IT'S YOUR TURN!" : userOnClock?.name || 'Unknown'}
+          <div className="text-right min-w-0">
+            <p className="text-[11px] sm:text-sm text-gray-500">On the Clock</p>
+            <p className={`text-sm sm:text-xl font-bold truncate ${isMyTurn ? 'text-green-600' : 'text-gray-800'}`}>
+              {isMyTurn ? (
+                <>
+                  {/* Shorter on phones so it never truncates next to the timer */}
+                  <span className="sm:hidden">YOUR TURN!</span>
+                  <span className="hidden sm:inline">IT'S YOUR TURN!</span>
+                </>
+              ) : (
+                userOnClock?.name || 'Unknown'
+              )}
             </p>
           </div>
-        </div>
-
-        {/* Connection status */}
-        <div className="mt-2 flex items-center gap-2 text-xs">
-          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></span>
-          <span className="text-gray-400">
-            {isConnected ? 'Connected' : 'Reconnecting...'}
-          </span>
         </div>
       </div>
 
       {/* Error display */}
       {pickError && <ErrorMessage message={pickError} />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* On phones the two columns dissolve (`contents`) and the panels reorder
+          (order-N) so the pick controls, team list and your roster come first;
+          the board, queue and activity feed follow. Desktop (lg) keeps the 2:1
+          layout in DOM order. */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
         {/* Main Content - Draft Board + Team Selection */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="contents lg:block lg:col-span-2 lg:space-y-4">
           {/* Pick Interface (only when it's your turn) */}
           {isMyTurn && (
-            <div className="bg-green-50 border-2 border-green-500 rounded-lg p-4">
+            <div className="order-1 lg:order-none bg-green-50 border-2 border-green-500 rounded-lg p-3 sm:p-4">
               <h3 className="font-bold text-green-800 mb-1">Make Your Pick</h3>
               <p className="text-xs text-green-700 mb-3">
                 Open slots:{' '}
@@ -551,13 +563,14 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                       setSearchTerm(e.target.value);
                       setSelectedTeam(null);
                     }}
-                    className="w-full p-3 pr-9 border-2 border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full p-3 pr-11 border-2 border-green-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                   />
                   {searchTerm && (
                     <button
                       onClick={clearSelection}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full text-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 active:bg-gray-200"
                       title="Clear search and selection"
+                      aria-label="Clear search and selection"
                     >
                       ×
                     </button>
@@ -594,19 +607,15 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={handleMakePick}
-                  disabled={!selectedTeam}
-                  className="px-6 py-3 bg-green-600 text-white rounded-lg font-bold hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                >
+                <Button size="lg" onClick={handleMakePick} disabled={!selectedTeam}>
                   Draft
-                </button>
+                </Button>
               </div>
             </div>
           )}
 
           {/* Draft Board Grid */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="order-4 lg:order-none bg-white rounded-lg shadow overflow-hidden">
             <div className="bg-green-600 text-white p-3">
               <h3 className="font-bold">Draft Board</h3>
             </div>
@@ -614,11 +623,11 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="p-2 text-left text-gray-600 font-semibold sticky left-0 bg-gray-50">Rd</th>
+                    <th className="p-2 text-left text-gray-600 font-semibold sticky left-0 z-10 bg-gray-50 border-r border-gray-200">Rd</th>
                     {draftState.members.map(member => (
                       <th
                         key={member.userId}
-                        className={`p-2 text-left font-semibold ${
+                        className={`p-2 text-left font-semibold min-w-[9rem] whitespace-nowrap ${
                           member.userId === draftState.onTheClockUserId
                             ? 'bg-green-100 text-green-800'
                             : 'text-gray-600'
@@ -633,7 +642,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                 <tbody>
                   {Array.from({ length: totalRounds }).map((_, roundIndex) => (
                     <tr key={roundIndex} className={roundIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                      <td className="p-2 font-bold text-gray-800 sticky left-0 bg-inherit">{roundIndex + 1}</td>
+                      <td className="p-2 font-bold text-gray-800 sticky left-0 z-10 bg-inherit border-r border-gray-200">{roundIndex + 1}</td>
                       {draftState.members.map((member, posIndex) => {
                         const round = roundIndex + 1;
                         const position = posIndex + 1;
@@ -674,22 +683,24 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
           </div>
 
           {/* Available Teams */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="order-2 lg:order-none bg-white rounded-lg shadow overflow-hidden">
             <div className="bg-gray-100 p-3 flex flex-wrap justify-between items-center gap-2">
               <h3 className="font-bold text-gray-800">Available Teams ({filteredTeams.length})</h3>
               <div className="relative">
+                {/* 16px on phones — anything smaller makes iOS Safari zoom the page on focus */}
                 <input
                   type="text"
                   placeholder="Filter..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="px-3 py-1 pr-7 border rounded text-sm w-40"
+                  className="px-3 py-1.5 pr-9 border rounded-lg text-base sm:text-sm w-44"
                 />
                 {searchTerm && (
                   <button
                     onClick={clearSelection}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-sm"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 active:bg-gray-200"
                     title="Clear search and selection"
+                    aria-label="Clear search and selection"
                   >
                     ×
                   </button>
@@ -697,24 +708,24 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
               </div>
             </div>
             {/* Slot filter chips */}
-            <div className="px-3 py-2 border-b flex flex-wrap gap-2">
+            <div className="px-3 py-2 border-b flex gap-2 overflow-x-auto no-scrollbar">
               {(['ALL', ...DRAFT_SLOTS] as SlotFilter[]).map(slot => (
                 <button
                   key={slot}
                   onClick={() => setSlotFilter(slot)}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                  className={`shrink-0 px-3 py-1.5 sm:py-1 min-h-[2.25rem] sm:min-h-0 rounded-full text-xs font-semibold transition-colors touch-manipulation ${
                     slotFilter === slot
                       ? 'bg-green-600 text-white'
                       : isSlotFilledForMe(slot as ConferenceSlot)
                       ? 'bg-gray-100 text-gray-400 line-through'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'
                   }`}
                 >
                   {slot === 'ALL' ? 'All' : SLOT_LABELS[slot as ConferenceSlot]}
                 </button>
               ))}
             </div>
-            <div className="max-h-64 overflow-y-auto p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            <div className="max-h-72 sm:max-h-64 overflow-y-auto p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {filteredTeams.map(team => {
                 const slotFilled = isSlotFilledForMe(team.slot);
                 const blocked = isMyTurn && slotFilled;
@@ -731,10 +742,10 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                       }
                     }}
                     title={blocked ? `${SLOT_LABELS[team.slot]} slot already filled` : undefined}
-                    className={`p-2 text-left rounded text-sm transition-colors ${
+                    className={`p-2 min-h-[3rem] text-left rounded text-sm transition-colors touch-manipulation ${
                       blocked
                         ? 'bg-gray-50 opacity-40 cursor-not-allowed'
-                        : 'hover:bg-green-50'
+                        : 'hover:bg-green-50 active:bg-green-100'
                     } ${
                       selectedTeam?.id === team.id ? 'bg-green-100 ring-2 ring-green-500' : 'bg-gray-50'
                     } ${queue.includes(team.id) ? 'border-2 border-blue-400' : ''}`}
@@ -749,9 +760,9 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
         </div>
 
         {/* Sidebar - Activity + Queue + Roster */}
-        <div className="space-y-4">
+        <div className="contents lg:block lg:space-y-4">
           {/* Activity Feed */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="order-6 lg:order-none bg-white rounded-lg shadow overflow-hidden">
             <div className="bg-gray-100 p-3">
               <h3 className="font-bold text-gray-800">Activity</h3>
             </div>
@@ -781,10 +792,11 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
           </div>
 
           {/* Queue Management */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="order-5 lg:order-none bg-white rounded-lg shadow overflow-hidden">
             <button
               onClick={() => setShowQueue(!showQueue)}
-              className="w-full bg-gray-100 p-3 flex justify-between items-center"
+              className="w-full bg-gray-100 p-3 flex justify-between items-center hover:bg-gray-200 active:bg-gray-200 transition-colors"
+              aria-expanded={showQueue}
             >
               <h3 className="font-bold text-gray-800">My Queue ({queue.length})</h3>
               <span className="text-gray-500">{showQueue ? '▼' : '▶'}</span>
@@ -827,7 +839,9 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
                           </div>
                           <button
                             onClick={() => handleRemoveFromQueue(teamId)}
-                            className="text-red-500 hover:text-red-700 text-sm px-2"
+                            className="w-9 h-9 -mr-1 shrink-0 flex items-center justify-center rounded-full text-lg text-red-500 hover:text-red-700 hover:bg-red-50 active:bg-red-100"
+                            title="Remove from queue"
+                            aria-label="Remove from queue"
                           >
                             &times;
                           </button>
@@ -844,7 +858,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
           </div>
 
           {/* Your Roster by Slot */}
-          <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="order-3 lg:order-none bg-white rounded-lg shadow overflow-hidden">
             <div className="bg-green-600 text-white p-3">
               <h3 className="font-bold">
                 Your Roster ({myFilledSlots.length}/{DRAFT_SLOTS.length})

@@ -68,39 +68,31 @@ export function Landing() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-900 to-green-700 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl p-8 max-w-md w-full">
-        <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold text-green-800 mb-2">Pick 6</h1>
+      <div className="bg-white rounded-lg shadow-2xl p-6 sm:p-8 max-w-md w-full">
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-4xl sm:text-5xl font-bold text-green-800 mb-2">Pick 6</h1>
           <p className="text-gray-600">College Football Fantasy</p>
         </div>
 
-        <div className="flex gap-2 mb-6">
-          <button
+        <div className="grid grid-cols-2 gap-2 mb-6">
+          <Button
+            variant={authMode === 'signin' ? 'primary' : 'secondary'}
             onClick={() => {
               setAuthMode('signin');
               setError('');
             }}
-            className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
-              authMode === 'signin'
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
           >
             Sign In
-          </button>
-          <button
+          </Button>
+          <Button
+            variant={authMode === 'signup' ? 'primary' : 'secondary'}
             onClick={() => {
               setAuthMode('signup');
               setError('');
             }}
-            className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
-              authMode === 'signup'
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
           >
             Sign Up
-          </button>
+          </Button>
         </div>
 
         {error && (
@@ -136,7 +128,7 @@ export function Landing() {
             required
           />
 
-          <Button type="submit" fullWidth disabled={isLoading}>
+          <Button type="submit" size="lg" fullWidth disabled={isLoading}>
             {isLoading ? 'Loading...' : authMode === 'signup' ? 'Create Account' : 'Sign In'}
           </Button>
         </form>

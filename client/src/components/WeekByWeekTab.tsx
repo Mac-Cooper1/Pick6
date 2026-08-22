@@ -66,7 +66,7 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
 
   if (isLoading) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
         </div>
@@ -76,14 +76,14 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
 
   if (error || !grid) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <ErrorMessage message="Failed to load week-by-week standings" />
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Season grid */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="bg-green-700 text-white p-4">
@@ -96,19 +96,19 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
           <table className="w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="p-2 text-left text-gray-600 font-semibold sticky left-0 bg-gray-50 z-10">
+                <th className="p-2 text-left text-gray-600 font-semibold sticky left-0 bg-gray-50 z-10 border-r border-gray-200">
                   Player
                 </th>
                 {grid.weeks.map((w) => (
                   <th key={w.weekNumber} className="p-1 text-center">
                     <button
                       onClick={() => setSelectedWeek(w.weekNumber)}
-                      className={`w-8 py-1 rounded font-semibold transition-colors ${
+                      className={`w-9 h-9 sm:w-8 sm:h-8 rounded font-semibold transition-colors touch-manipulation ${
                         week === w.weekNumber
                           ? 'bg-green-600 text-white'
                           : w.weekNumber === grid.currentWeek
                           ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                          : 'text-gray-600 hover:bg-gray-200'
+                          : 'text-gray-600 hover:bg-gray-200 active:bg-gray-300'
                       }`}
                       title={w.label}
                     >
@@ -123,9 +123,11 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
               {grid.rows.map((row) => (
                 <tr
                   key={row.userId}
-                  className={`border-t ${row.userId === user?.id ? 'bg-green-50' : ''}`}
+                  className={`border-t ${row.userId === user?.id ? 'bg-green-50' : 'bg-white'}`}
                 >
-                  <td className="p-2 font-medium sticky left-0 bg-inherit z-10 whitespace-nowrap">
+                  {/* Explicit row backgrounds above: the sticky cell inherits them, so
+                      week cells no longer show through it when the grid scrolls sideways */}
+                  <td className="p-2 font-medium sticky left-0 bg-inherit z-10 whitespace-nowrap border-r border-gray-200">
                     <span className="text-gray-400 text-xs mr-1">{row.rank}.</span>
                     {row.userName}
                   </td>
@@ -162,7 +164,7 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
           {detail && (
             <div className="divide-y">
               {detail.members.map((member) => (
-                <div key={member.userId} className="p-4">
+                <div key={member.userId} className="p-3 sm:p-4">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className={`font-bold ${member.userId === user?.id ? 'text-green-700' : 'text-gray-800'}`}>
                       {member.userName}

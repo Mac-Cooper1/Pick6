@@ -81,7 +81,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
 
   if (leagueLoading || membersLoading) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
         </div>
@@ -91,7 +91,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
 
   if (leagueError || membersError) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <ErrorMessage
           message={(leagueError as any)?.response?.data?.message || 'Failed to load league data'}
         />
@@ -100,10 +100,10 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       {/* League Info Card */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <h2 className="text-2xl font-bold text-green-800 mb-2">{league?.name}</h2>
+      <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
+        <h2 className="text-xl sm:text-2xl font-bold text-green-800 mb-2">{league?.name}</h2>
         <div className="text-gray-600 space-y-1">
           <p>
             Join Code: <span className="font-mono font-bold text-lg">{league?.joinCode}</span>
@@ -121,9 +121,9 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
       <div className="space-y-4">
         {members && members.length > 0 ? (
           members.map((member, idx) => (
-            <div key={member.id} className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-800">
+            <div key={member.id} className="bg-white rounded-lg shadow p-4 sm:p-6">
+              <div className="flex items-center justify-between gap-2 mb-4">
+                <h3 className="text-lg sm:text-xl font-bold text-gray-800">
                   {idx + 1}. {member.name}
                 </h3>
                 <span className="text-sm text-gray-500">{member.teams.length}/5 teams</span>
@@ -223,7 +223,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
             </div>
           ))
         ) : (
-          <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
+          <div className="bg-white rounded-lg shadow p-4 sm:p-6 text-center text-gray-500">
             No members yet
           </div>
         )}

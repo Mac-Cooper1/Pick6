@@ -11,6 +11,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { draftApi, rosterApi, swapApi } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
+import { Button } from './Button';
 import { DRAFT_SLOTS, SLOT_LABELS, ConferenceSlot, RosterEntry, Team } from '../types';
 
 interface DraftRecapTabProps {
@@ -97,7 +98,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
 
   if (rostersLoading) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
         </div>
@@ -107,7 +108,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
 
   if (rostersError) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <ErrorMessage message="Failed to load rosters" />
       </div>
     );
@@ -131,7 +132,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Swap window (visible once opened) */}
       {swapState && swapState.status !== 'NOT_OPEN' && (
         <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -231,22 +232,22 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
                   </select>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button
+                  variant="amber"
                   onClick={() => swapMutation.mutate()}
                   disabled={!swapDrop || !swapAddId || swapMutation.isPending}
-                  className="px-4 py-2 bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                 >
                   {swapMutation.isPending ? 'Swapping…' : 'Confirm Swap (one per season!)'}
-                </button>
+                </Button>
                 {onTheClockMe && (
-                  <button
+                  <Button
+                    variant="secondary"
                     onClick={() => passMutation.mutate()}
                     disabled={passMutation.isPending}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
                   >
                     Pass my turn
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -273,9 +274,9 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="p-3 text-left text-gray-600 font-semibold sticky left-0 bg-gray-50">Player</th>
+                  <th className="p-2 sm:p-3 text-left text-gray-600 font-semibold sticky left-0 z-10 bg-gray-50 border-r border-gray-200">Player</th>
                   {DRAFT_SLOTS.map((slot) => (
-                    <th key={slot} className="p-3 text-left text-gray-600 font-semibold">
+                    <th key={slot} className="p-2 sm:p-3 text-left text-gray-600 font-semibold min-w-[8.5rem] whitespace-nowrap">
                       {SLOT_LABELS[slot]}
                     </th>
                   ))}
@@ -285,11 +286,15 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
                 {rosters?.map((member, idx) => (
                   <tr
                     key={member.userId}
-                    className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${
-                      member.userId === user?.id ? 'bg-green-50' : ''
-                    }`}
+                    className={
+                      member.userId === user?.id
+                        ? 'bg-green-50'
+                        : idx % 2 === 0
+                        ? 'bg-white'
+                        : 'bg-gray-50'
+                    }
                   >
-                    <td className="p-3 font-semibold text-gray-800 sticky left-0 bg-inherit">
+                    <td className="p-2 sm:p-3 font-semibold text-gray-800 sticky left-0 z-10 bg-inherit border-r border-gray-200 whitespace-nowrap">
                       {member.userName}
                       {member.userId === user?.id && (
                         <span className="text-green-600 text-xs ml-1">(You)</span>
@@ -301,7 +306,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
                     {DRAFT_SLOTS.map((slot) => {
                       const entry = member.roster.find((r) => r.slot === slot);
                       return (
-                        <td key={slot} className="p-3">
+                        <td key={slot} className="p-2 sm:p-3">
                           {entry ? (
                             <div>
                               <div className="font-medium">

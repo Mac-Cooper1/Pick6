@@ -87,8 +87,8 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-900 to-green-700 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl p-8 max-w-md w-full">
-        <h2 className="text-3xl font-bold text-green-800 text-center mb-2">
+      <div className="bg-white rounded-lg shadow-2xl p-6 sm:p-8 max-w-md w-full">
+        <h2 className="text-2xl sm:text-3xl font-bold text-green-800 text-center mb-2">
           Welcome, {user?.name}!
         </h2>
         <p className="text-gray-600 text-center mb-6">Let's get you in a league</p>
@@ -101,10 +101,10 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
 
         {flowMode === 'select' && (
           <div className="space-y-4">
-            <Button fullWidth onClick={() => setFlowMode('create')}>
+            <Button size="lg" fullWidth onClick={() => setFlowMode('create')}>
               Create League
             </Button>
-            <Button fullWidth variant="secondary" onClick={() => setFlowMode('join')}>
+            <Button size="lg" fullWidth variant="secondary" onClick={() => setFlowMode('join')}>
               Join League
             </Button>
           </div>
@@ -150,11 +150,12 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
             />
 
             <div className="flex gap-2">
-              <Button type="submit" fullWidth disabled={isLoading}>
+              <Button type="submit" size="lg" fullWidth disabled={isLoading}>
                 {isLoading ? 'Creating...' : 'Create League'}
               </Button>
               <Button
                 type="button"
+                size="lg"
                 variant="secondary"
                 onClick={() => navigate('/dashboard')}
               >
@@ -179,11 +180,12 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
             />
 
             <div className="flex gap-2">
-              <Button type="submit" fullWidth disabled={isLoading}>
+              <Button type="submit" size="lg" fullWidth disabled={isLoading}>
                 {isLoading ? 'Joining...' : 'Join League'}
               </Button>
               <Button
                 type="button"
+                size="lg"
                 variant="secondary"
                 onClick={() => navigate('/dashboard')}
               >

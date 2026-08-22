@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leagueApi, adminApi, swapApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
+import { Button } from './Button';
 
 interface SettingsTabProps {
   leagueId: number;
@@ -150,7 +151,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
 
   if (!currentLeague) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
         </div>
@@ -159,9 +160,9 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       {/* League Info */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
         <h2 className="text-xl font-bold text-gray-800 mb-4">League Settings</h2>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
@@ -184,7 +185,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
       </div>
 
       {/* Draft Status */}
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
         <h3 className="text-lg font-bold text-gray-800 mb-4">Draft Status</h3>
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -211,7 +212,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
 
       {/* Commissioner: manual sync */}
       {isCommissioner && (
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
           <div className="flex items-center gap-2 mb-2">
             <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
               Commissioner
@@ -227,22 +228,22 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
               {syncResult}
             </div>
           )}
-          <button
+          <Button
+            variant="blue"
             onClick={() => {
               setSyncResult(null);
               syncMutation.mutate();
             }}
             disabled={syncMutation.isPending}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
           >
             {syncMutation.isPending ? 'Syncing…' : `Sync Week ${currentLeague.currentWeek} Now`}
-          </button>
+          </Button>
         </div>
       )}
 
       {/* Commissioner: week-5 swap window */}
       {isCommissioner && (
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
           <div className="flex items-center gap-2 mb-2">
             <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
               Commissioner
@@ -264,24 +265,24 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
               {swapMessage}
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {swapState?.status === 'NOT_OPEN' && (
-              <button
+              <Button
+                variant="amber"
                 onClick={() => swapWindowMutation.mutate('open')}
                 disabled={swapWindowMutation.isPending}
-                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-300 transition-colors"
               >
                 Open swap window now
-              </button>
+              </Button>
             )}
             {swapState?.status === 'OPEN' && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => swapWindowMutation.mutate('close')}
                 disabled={swapWindowMutation.isPending}
-                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-300 transition-colors"
               >
                 Close swap window
-              </button>
+              </Button>
             )}
             {swapState?.status === 'CLOSED' && (
               <p className="text-sm text-gray-500">The window is closed for the season.</p>
@@ -292,7 +293,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
 
       {/* Commissioner Settings */}
       {isCommissioner ? (
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white rounded-lg shadow p-4 sm:p-6">
           <div className="flex items-center gap-2 mb-4">
             <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
               Commissioner
@@ -369,29 +370,29 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 pt-4 border-t">
-                <button
+              <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t">
+                <Button
+                  className="sm:flex-1"
                   onClick={handleScheduleDraft}
                   disabled={updateSettingsMutation.isPending || !draftDate || !draftTime}
-                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                 >
                   {updateSettingsMutation.isPending ? 'Saving...' : 'Save & Schedule Draft'}
-                </button>
+                </Button>
                 {currentLeague.draftScheduledAt && (
-                  <button
+                  <Button
+                    variant="secondary"
                     onClick={handleClearSchedule}
                     disabled={updateSettingsMutation.isPending}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
                   >
                     Clear Schedule
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white rounded-lg shadow p-4 sm:p-6">
           <h3 className="text-lg font-bold text-gray-800 mb-2">Commissioner Settings</h3>
           <p className="text-gray-600">
             Only the league commissioner can modify draft settings.
