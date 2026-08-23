@@ -32,7 +32,13 @@ turn — standing instruction from Mac)**.
   (default) · Week by Week (grid + per-week drill-down) · League (rosters +
   spreads) · Draft (live room) · Draft Recap (rosters by slot + swap UI) ·
   Settings (commissioner: schedule draft, Sync Now, swap window, 90s default
-  clock).
+  clock). `components/Button.tsx` is **the one button** (variants primary ·
+  secondary · outline · danger · amber=swap · blue=sync · nav; sizes sm/md/lg;
+  44px tap height on phones) — route every action through it; raw `<button>`s
+  are only for purpose-built controls (tab strip, slot chips, team cards,
+  icon ×s). Mobile-first via `sm:`/`md:`/`lg:` prefixes: phones get `p-4`, a
+  sideways-scrolling tab strip, and a reordered draft room (`contents` +
+  `order-N` on the panels; desktop keeps DOM order).
 - **Production = ONE Render service** (`render.yaml` blueprint): Express
   serves `client/dist` with an SPA fallback → everything same-origin, **no
   CORS config, no VITE_API_URL** (that env var exists only as a split-deploy
@@ -74,6 +80,15 @@ boundary, and the full swap lifecycle. It wipes/recreates its own data
 prod**. Before ending a turn: `npx tsc` in `server/`, `npm run build` in
 `client/`.
 
+**Phone-viewport checks** (no device needed): headless Chrome is installed —
+drive it with `puppeteer-core` from the scratchpad, mint a JWT for a test
+user with `JWT_SECRET` from `server/.env` and drop it into `localStorage`
+(`pick6_token` + `pick6_user` = `{id,name,email}` JSON), then screenshot at
+375×812 (`isMobile`, `deviceScaleFactor: 2`) and 1280×800. Local test data:
+league 6 `SMOKE1` (complete + scored), LIVE repro leagues 9–11 (users 21–32,
+`*@repro.local`) whose stalled pick clocks resume the moment a client
+connects. Tabs are component state, not routes — click the button by label.
+
 ## Gotchas (each one cost real debugging time)
 
 - **Port 5433 locally.** A native Homebrew postgresql@15 owns 5432 for Mac's
@@ -96,6 +111,10 @@ prod**. Before ending a turn: `npx tsc` in `server/`, `npm run build` in
 - Vercel is retired (Aug 5) — don't suggest it. Old service
   `pick6-r5q0.onrender.com` was a pre-rebuild corpse; the blueprint service
   replaced it.
+- Tailwind `future.hoverOnlyWhenSupported` is on: `hover:` styles only apply
+  on devices that can hover, so tapped buttons don't stick in their hover
+  color — give tappable things an `active:` state instead. Inputs must stay
+  ≥16px on phones or iOS Safari zooms the page on focus.
 
 ## How Mac works (respect this)
 
@@ -125,12 +144,13 @@ Week 1 games: **Aug 27–Sep 7** (dress-rehearsal target: the Aug 27–29
 slate). League drafts before Sep 5. Week 5 ends **Oct 4** → swap window
 auto-opens. Season ends Dec 12 (Army-Navy, week 15). No bowls, no CFP.
 
-## Status (as of Aug 7, 2026)
+## Status (as of Aug 22, 2026)
 
 Live on Render, single-service, cron active. All launch workstreams
-(WS1–WS10, D1–D7) done — LAUNCH_PLAN is history now, not a todo list. Mac is
-mid-QA (round 1 fixed: sticky draft clock, timeout-drafts-your-selection,
-clear buttons, 90s default clock, spreads-not-moneylines on League tab, text
-wrapping, scoring-copy clarity). Next up: his call, but the known backlog is
-the **mobile overhaul** (NOTES.md, top priority once features freeze) and
-the Aug 27–29 dress rehearsal on real games.
+(WS1–WS10, D1–D7) done — LAUNCH_PLAN is history now, not a todo list. QA
+round 1 (Aug 7) fixed the draft clock / timeout / clear-button / copy items.
+The **mobile design pass** landed Aug 22 (scrolling tab strip, `Button` kit,
+hover-only-when-supported, one-row sticky draft header, phone panel reorder,
+scroll-not-squish tables — design only, no logic touched) and is awaiting
+Mac's on-device review. Next up: the Aug 27–29 dress rehearsal on real
+games, then the general visual-design pass parked in NOTES.md.

@@ -4,13 +4,20 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## Design backlog
 
-- **Mobile overhaul (top priority once features freeze).** Current mobile layout
-  is rough everywhere. Known offenders from the first real draft (Aug 5 QA):
-  the draft room board/grid, the six-tab nav, Week by Week grid, and the swap
-  panel. Needs a real pass: nav that collapses, draft room laid out
-  mobile-first, tables that scroll or reflow deliberately.
+- ~~**Mobile overhaul**~~ — **done Aug 22, 2026** (README changelog has the
+  full list): sideways-scrolling tab strip, `Button` kit with 44px tap targets,
+  hover-only-when-supported + pressed states, one-row sticky draft header,
+  draft-room panels reordered on phones, tables that scroll instead of squish.
+  Deliberately *not* done: a bottom tab bar with icons (six tabs is over the
+  limit and it would mean maintaining two navs), a 2×3 tab grid (~90px of
+  chrome), and any logic changes (the one copy tweak: the phone header says
+  "YOUR TURN!" so it never truncates). Still open from the original list:
+  the draft board is a horizontally scrolling table on phones rather than a
+  reflowed layout — fine for ≤6 players, revisit if leagues get bigger.
 - General visual design pass after mobile (spacing, type scale, empty states,
-  loading states) — the app is utility-styled Tailwind right now.
+  loading states) — the app is utility-styled Tailwind right now. The `Button`
+  kit (variants + sizes) is the first piece of that system; build on it rather
+  than adding one-off classes.
 
 ## V2 ideas
 

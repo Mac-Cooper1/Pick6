@@ -25,7 +25,7 @@ export function DraftTab({ leagueId }: DraftTabProps) {
 
   if (isLoading) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
         </div>
@@ -41,8 +41,8 @@ export function DraftTab({ leagueId }: DraftTabProps) {
 
   // Fallback for when draft state is not available
   return (
-    <div className="p-6">
-      <div className="bg-white rounded-lg shadow p-8 text-center">
+    <div className="p-4 sm:p-6">
+      <div className="bg-white rounded-lg shadow p-6 sm:p-8 text-center">
         <h2 className="text-2xl font-bold text-gray-800 mb-4">Draft</h2>
         <p className="text-gray-600 mb-4">
           Unable to load draft state. Please try again later.

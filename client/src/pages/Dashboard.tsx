@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { leagueApi, MyLeague } from '../services/api';
 import { Loading } from '../components/Loading';
 import { ErrorMessage } from '../components/ErrorMessage';
+import { Button } from '../components/Button';
 
 export function Dashboard() {
   const { user, logout } = useAuth();
@@ -48,7 +49,7 @@ export function Dashboard() {
     };
 
     return (
-      <span className={`px-2 py-1 text-xs font-medium rounded-full ${colors[status]}`}>
+      <span className={`px-2 py-1 text-xs font-medium rounded-full whitespace-nowrap ${colors[status]}`}>
         {labels[status]}
       </span>
     );
@@ -89,38 +90,32 @@ export function Dashboard() {
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Navbar */}
-      <nav className="bg-green-800 text-white p-4 shadow-lg">
-        <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Pick 6</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-sm">Welcome, {user?.name}</span>
-            <button
-              onClick={logout}
-              className="text-sm bg-green-700 hover:bg-green-600 px-3 py-1 rounded transition-colors"
-            >
+      <nav className="bg-green-800 text-white px-3 py-2 sm:px-4 sm:py-3 shadow-lg">
+        <div className="max-w-6xl mx-auto flex justify-between items-center gap-3">
+          <h1 className="text-xl sm:text-2xl font-bold">Pick 6</h1>
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <span className="text-sm truncate min-w-0">
+              <span className="hidden sm:inline">Welcome, </span>
+              {user?.name}
+            </span>
+            <Button variant="nav" size="sm" onClick={logout} className="shrink-0">
               Logout
-            </button>
+            </Button>
           </div>
         </div>
       </nav>
 
-      <div className="max-w-6xl mx-auto p-6">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">My Leagues</h2>
-          <div className="flex gap-3">
-            <button
-              onClick={() => navigate('/league/join')}
-              className="px-4 py-2 bg-white border border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition-colors"
-            >
+      <div className="max-w-6xl mx-auto p-4 sm:p-6">
+        {/* Header — title row, then two equal buttons on phones; one row on desktop */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-4 sm:mb-6">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-800">My Leagues</h2>
+          <div className="grid grid-cols-2 gap-3 sm:flex">
+            <Button variant="outline" onClick={() => navigate('/league/join')}>
               Join League
-            </button>
-            <button
-              onClick={() => navigate('/league/create')}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-            >
+            </Button>
+            <Button onClick={() => navigate('/league/create')}>
               Create League
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -128,7 +123,7 @@ export function Dashboard() {
 
         {/* No leagues message */}
         {leagues.length === 0 && !error && (
-          <div className="bg-white rounded-lg shadow-md p-8 text-center">
+          <div className="bg-white rounded-lg shadow-md p-6 sm:p-8 text-center">
             <div className="text-6xl mb-4">🏈</div>
             <h3 className="text-xl font-semibold text-gray-800 mb-2">
               No leagues yet
@@ -136,19 +131,13 @@ export function Dashboard() {
             <p className="text-gray-600 mb-6">
               Create a new league or join an existing one to get started!
             </p>
-            <div className="flex justify-center gap-4">
-              <button
-                onClick={() => navigate('/league/join')}
-                className="px-6 py-2 bg-white border border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition-colors"
-              >
+            <div className="grid grid-cols-1 gap-3 sm:flex sm:justify-center sm:gap-4">
+              <Button variant="outline" size="lg" onClick={() => navigate('/league/join')}>
                 Join a League
-              </button>
-              <button
-                onClick={() => navigate('/league/create')}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
+              </Button>
+              <Button size="lg" onClick={() => navigate('/league/create')}>
                 Create a League
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -161,15 +150,15 @@ export function Dashboard() {
               className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
               onClick={() => navigate(`/league/${league.id}`)}
             >
-              <div className="p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-xl font-bold text-gray-800">
+              <div className="p-4 sm:p-6">
+                <div className="flex flex-wrap justify-between items-start gap-2 mb-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <h3 className="text-lg sm:text-xl font-bold text-gray-800">
                         {league.name}
                       </h3>
                       {league.isCommissioner && (
-                        <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">
+                        <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full whitespace-nowrap">
                           Commissioner
                         </span>
                       )}
@@ -184,7 +173,7 @@ export function Dashboard() {
                 {/* Draft info */}
                 {league.draftStatus === 'SCHEDULED' && league.draftScheduledAt && (
                   <div className="mb-4 p-3 bg-yellow-50 rounded-lg">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
                       <div>
                         <p className="text-sm font-medium text-yellow-800">
                           Draft scheduled for:

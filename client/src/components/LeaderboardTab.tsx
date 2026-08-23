@@ -23,7 +23,7 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
 
   if (isLoading) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
         </div>
@@ -33,27 +33,27 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
 
   if (error) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <ErrorMessage message="Failed to load the leaderboard" />
       </div>
     );
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <div className="max-w-2xl mx-auto">
         <div className="bg-white rounded-lg shadow overflow-hidden">
           <div className="bg-green-700 text-white p-4">
-            <h2 className="text-2xl font-bold">Leaderboard</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">Leaderboard</h2>
             <p className="text-green-100 text-sm">Cumulative points, all season</p>
           </div>
 
-          <div className="p-4">
+          <div className="p-2 sm:p-4">
             {standings && standings.length > 0 ? (
               <table className="w-full">
                 <thead>
                   <tr className="border-b text-left">
-                    <th className="p-2 font-semibold text-gray-700 w-16">Rank</th>
+                    <th className="p-2 font-semibold text-gray-700 w-12 sm:w-16">Rank</th>
                     <th className="p-2 font-semibold text-gray-700">Player</th>
                     <th className="p-2 text-right font-semibold text-gray-700">Points</th>
                   </tr>
@@ -67,9 +67,9 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
                       }`}
                     >
                       <td className="p-2">
-                        {standing.rank === 1 && <span className="text-2xl">🏆</span>}
-                        {standing.rank === 2 && <span className="text-2xl">🥈</span>}
-                        {standing.rank === 3 && <span className="text-2xl">🥉</span>}
+                        {standing.rank === 1 && <span className="text-xl sm:text-2xl">🏆</span>}
+                        {standing.rank === 2 && <span className="text-xl sm:text-2xl">🥈</span>}
+                        {standing.rank === 3 && <span className="text-xl sm:text-2xl">🥉</span>}
                         {standing.rank > 3 && (
                           <span className="font-bold text-gray-800 pl-2">{standing.rank}</span>
                         )}
@@ -96,7 +96,7 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
         </div>
 
         {/* Scoring Legend */}
-        <div className="mt-6 bg-white rounded-lg shadow p-6">
+        <div className="mt-4 sm:mt-6 bg-white rounded-lg shadow p-4 sm:p-6">
           <h3 className="font-bold text-gray-800 mb-3">Scoring — per team, per week</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
