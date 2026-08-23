@@ -46,7 +46,7 @@ Smaller spreads and pick'ems score as regular results.
 
 ## Tech Stack
 
-**Frontend**: React 18 + TypeScript, Vite, Tailwind, React Router, TanStack Query, socket.io-client
+**Frontend**: React 18 + TypeScript, Vite, Tailwind, React Router, TanStack Query, socket.io-client, Phosphor icons, self-hosted Barlow / Barlow Condensed (`@fontsource`)
 **Backend**: Node/Express + TypeScript, Prisma + PostgreSQL, Socket.IO, JWT + bcrypt
 **Data**: ESPN hidden API (scores, schedules, rankings, season calendar, team/conference membership) + The Odds API (spreads; 500 req/mo free tier, ~90 used)
 
@@ -125,6 +125,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 ```
 pick6/
 ├── client/src/            # React app (pages, components, contexts, services)
+│   └── pages/             # Landing (/), Login (/login), Dashboard, LeagueSetup, MainApp (tabs)
 ├── server/src/
 │   ├── controllers/       # auth, leagues, draft, rosters, standings, admin
 │   ├── services/          # draft, roster, sync (ESPN+odds pipeline), season calendar,
@@ -158,6 +159,15 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Aug 23, 2026** — Visual design pass + landing page (design only; every query, socket call, mutation and `onClick` is untouched, no server changes):
+- **Type system**: self-hosted Barlow (UI) + Barlow Condensed (headlines, tab labels, the draft clock, every big number) via `@fontsource`, tabular numerals everywhere. Shape system documented in `index.css`: cards `rounded-xl` + 1px border + green-tinted shadow (`.card`), buttons/inputs `rounded-lg`, chips pills. New utility classes `.section-title` / `.section-sub` / `.label` replace the per-card green header bars
+- **Brand mark + favicon**: the brown-football SVG is replaced by a deep-green tile with a bold 6 and a gold goal line (`public/favicon.svg`, plus `favicon-32.png` and a full-bleed `apple-touch-icon.png` rendered with the real font for Safari / iOS home screens; `theme-color` set). `components/Logo.tsx` renders the same mark + wordmark in the app (inverted to white on the green header)
+- **App chrome**: one `AppHeader` (deep green, logo, name, Log out, optional back arrow) with the tab strip *inside* the band: condensed uppercase labels, gold underline on the active tab, still sideways-scrolling on phones. Emoji retired: podium ranks are gold/silver/bronze medallions (`RankBadge`), the ⚡ upset bolt is now an explicit `UPSET W` / `BUST L` badge, the 🏈 empty state uses the mark; icons from `@phosphor-icons/react` (back arrow, queue caret, CTA arrows)
+- **Tabs**: Leaderboard is the showpiece (big condensed point totals, leader callout, four tinted scoring tiles); Week by Week, League, Draft Recap, Settings and the draft room get typographic section headers, `.card` panels, and `label`-style column heads; the live draft header is now a dark-green scoreboard (clock turns gold on your turn, amber-outlined Make Your Pick panel); one shared `Loading inline` replaced seven copy-pasted spinners; `Input` always renders its label (no placeholder-as-label) and `ErrorMessage` is a left-accent alert
+- **Landing page** (new, signed-out `/`): hero with the rules in one line and a *real* mini Leaderboard / week-card preview built from the app's own components with labelled sample data, "How it works" numbered stack, the five slot tiles (scroll-snap on phones), 2×2 scoring bento, week-5 swap band, season dates (Aug 27 / Sep 5 / Oct 4 / Dec 12), closing CTA. Signed-in users are redirected to `/dashboard`
+- **Auth moved to `/login`** (`?mode=signup` for the sign-up form): split layout with a brand panel on desktop, labelled fields, autocomplete hints. `ProtectedRoute` and the 401 interceptor now send you to `/login`; LeagueSetup got the same header + form treatment. Copy sweep: em-dashes out of every visible string, "Logout" → "Log out", status badges in condensed caps
+- Verified with headless-Chrome screenshots of every screen at 375×812 and 1280×800 (before/after, incl. a live draft on the clock); `tsc` + `vite build` green. Deliberately parked in `NOTES.md`: dark mode, a bottom tab bar, photography on the landing page
 
 **Aug 22, 2026** — Mobile design pass (design only — no logic changed; every `onClick`/`disabled`/query/socket call is byte-identical):
 - **Tab bar**: six equal-width tabs wrapped to 2–3 lines at 375px and clipped on an iPhone SE. Now a single-row strip that scrolls sideways on phones (the 4th tab peeks at the edge; the active tab auto-scrolls into view) and stays equal-width on desktop; active state is green text + underline instead of a solid green block

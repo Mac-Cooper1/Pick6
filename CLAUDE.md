@@ -28,17 +28,32 @@ turn — standing instruction from Mac)**.
   clock, never stored**), `swapService` (WS8: turn order, 24h lazy-expiry
   clock, effective-week roster math), `teamMatcher` (`wasUpset` holds the
   ±3.5 threshold), `espnClient`, `oddsClient`, in-memory `cacheService`.
-- **Client**: React 18 + Vite + Tailwind + TanStack Query. Tabs: Leaderboard
-  (default) · Week by Week (grid + per-week drill-down) · League (rosters +
-  spreads) · Draft (live room) · Draft Recap (rosters by slot + swap UI) ·
-  Settings (commissioner: schedule draft, Sync Now, swap window, 90s default
-  clock). `components/Button.tsx` is **the one button** (variants primary ·
+- **Client**: React 18 + Vite + Tailwind + TanStack Query. Routes: `/` =
+  marketing landing (signed-out; signed-in users bounce to `/dashboard`),
+  `/login` (`?mode=signup`), `/dashboard`, `/league/create|join`,
+  `/league/:id` (tabs). Tabs: Leaderboard (default) · Week by Week (grid +
+  per-week drill-down) · League (rosters + spreads) · Draft (live room) ·
+  Draft Recap (rosters by slot + swap UI) · Settings (commissioner: schedule
+  draft, Sync Now, swap window, 90s default clock).
+  **Design system (Aug 23)**: Barlow (UI) + Barlow Condensed (`font-display`:
+  headlines, tab labels, clock, big numbers), self-hosted via `@fontsource`
+  imports in `main.tsx`; icons from `@phosphor-icons/react` only, no emoji.
+  `index.css` defines `.card` (rounded-xl, 1px border, green-tinted shadow),
+  `.section-title`/`.section-sub` (page headings), `.label` (small caps
+  labels) — use those, don't reinvent. `components/AppHeader.tsx` = the
+  signed-in header (green band, tab strip inside it, gold active underline);
+  `components/Logo.tsx` = mark + wordmark (same geometry as
+  `public/favicon.svg`; `favicon-32.png` / `apple-touch-icon.png` are
+  rendered from it — re-render them if the mark changes).
+  `components/Button.tsx` is **the one button** (variants primary ·
   secondary · outline · danger · amber=swap · blue=sync · nav; sizes sm/md/lg;
   44px tap height on phones) — route every action through it; raw `<button>`s
   are only for purpose-built controls (tab strip, slot chips, team cards,
   icon ×s). Mobile-first via `sm:`/`md:`/`lg:` prefixes: phones get `p-4`, a
   sideways-scrolling tab strip, and a reordered draft room (`contents` +
-  `order-N` on the panels; desktop keeps DOM order).
+  `order-N` on the panels; desktop keeps DOM order). Visible UI copy: no
+  em-dashes (periods/commas/colons instead), light theme only (dark mode is
+  parked in NOTES.md).
 - **Production = ONE Render service** (`render.yaml` blueprint): Express
   serves `client/dist` with an SPA fallback → everything same-origin, **no
   CORS config, no VITE_API_URL** (that env var exists only as a split-deploy
@@ -144,13 +159,14 @@ Week 1 games: **Aug 27–Sep 7** (dress-rehearsal target: the Aug 27–29
 slate). League drafts before Sep 5. Week 5 ends **Oct 4** → swap window
 auto-opens. Season ends Dec 12 (Army-Navy, week 15). No bowls, no CFP.
 
-## Status (as of Aug 22, 2026)
+## Status (as of Aug 23, 2026)
 
 Live on Render, single-service, cron active. All launch workstreams
 (WS1–WS10, D1–D7) done — LAUNCH_PLAN is history now, not a todo list. QA
 round 1 (Aug 7) fixed the draft clock / timeout / clear-button / copy items.
-The **mobile design pass** landed Aug 22 (scrolling tab strip, `Button` kit,
-hover-only-when-supported, one-row sticky draft header, phone panel reorder,
-scroll-not-squish tables — design only, no logic touched) and is awaiting
-Mac's on-device review. Next up: the Aug 27–29 dress rehearsal on real
-games, then the general visual-design pass parked in NOTES.md.
+The **mobile design pass** landed Aug 22 and the **visual design pass +
+landing page** landed Aug 23 (type system, brand mark/favicon, scoreboard
+header, Leaderboard showpiece, `/` landing, auth at `/login` — design only,
+no logic touched); both await Mac's on-device review. Next up: the Aug 27–29
+dress rehearsal on real games. Dark mode and landing-page photography are
+parked in NOTES.md.

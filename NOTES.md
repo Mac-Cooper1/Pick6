@@ -14,10 +14,20 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
   "YOUR TURN!" so it never truncates). Still open from the original list:
   the draft board is a horizontally scrolling table on phones rather than a
   reflowed layout — fine for ≤6 players, revisit if leagues get bigger.
-- General visual design pass after mobile (spacing, type scale, empty states,
-  loading states) — the app is utility-styled Tailwind right now. The `Button`
-  kit (variants + sizes) is the first piece of that system; build on it rather
-  than adding one-off classes.
+- ~~General visual design pass~~ — **done Aug 23, 2026** (README changelog):
+  Barlow / Barlow Condensed type system, `.card` / `.section-title` / `.label`
+  classes, green scoreboard header with the tab strip inside it, new mark +
+  favicon, landing page at `/` with auth moved to `/login`. Build on those
+  classes rather than adding one-off styling. Still open:
+  - **Dark mode.** The app is light-only by design for now (one theme, less
+    to test before the Aug 27 rehearsal). If added: CSS-variable tokens, keep
+    the green header as-is, test the draft room first.
+  - **Photography on the landing page.** It's typographic + a real component
+    preview today. A stadium/tailgate photo in the hero would lift it, but
+    only with a real licensed image (no stock placeholders).
+  - Skeleton loaders instead of the spinner on the Leaderboard / Week tabs.
+  - The "How it works" section could show a short screen recording of the
+    draft room once the dress rehearsal produces one.
 
 ## V2 ideas
 

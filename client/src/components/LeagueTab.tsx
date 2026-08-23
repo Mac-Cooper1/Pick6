@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
+import { Loading } from './Loading';
 
 interface LeagueTabProps {
   leagueId: number;
@@ -79,15 +80,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
     return map;
   }, [allMatchups]);
 
-  if (leagueLoading || membersLoading) {
-    return (
-      <div className="p-4 sm:p-6">
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
-        </div>
-      </div>
-    );
-  }
+  if (leagueLoading || membersLoading) return <Loading inline />;
 
   if (leagueError || membersError) {
     return (
@@ -101,19 +94,18 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
 
   return (
     <div className="p-4 sm:p-6">
-      {/* League Info Card */}
-      <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
-        <h2 className="text-xl sm:text-2xl font-bold text-green-800 mb-2">{league?.name}</h2>
-        <div className="text-gray-600 space-y-1">
-          <p>
-            Join Code: <span className="font-mono font-bold text-lg">{league?.joinCode}</span>
+      {/* League header */}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4 sm:mb-6">
+        <div>
+          <h2 className="section-title">{league?.name}</h2>
+          <p className="section-sub">
+            {members?.length}/{league?.maxPlayers} players
+            {league?.draftComplete && <span className="text-green-700 font-semibold"> &middot; draft complete</span>}
           </p>
-          <p>
-            Players: {members?.length}/{league?.maxPlayers}
-          </p>
-          {league?.draftComplete && (
-            <p className="text-green-600 font-semibold">Draft Complete!</p>
-          )}
+        </div>
+        <div className="card px-4 py-2.5 inline-flex items-center gap-3 self-start sm:self-auto">
+          <span className="label">Join code</span>
+          <span className="font-mono font-bold text-lg tracking-widest text-gray-900">{league?.joinCode}</span>
         </div>
       </div>
 
@@ -121,12 +113,13 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
       <div className="space-y-4">
         {members && members.length > 0 ? (
           members.map((member, idx) => (
-            <div key={member.id} className="bg-white rounded-lg shadow p-4 sm:p-6">
-              <div className="flex items-center justify-between gap-2 mb-4">
-                <h3 className="text-lg sm:text-xl font-bold text-gray-800">
-                  {idx + 1}. {member.name}
+            <div key={member.id} className="card p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h3 className="font-display font-bold uppercase tracking-wide text-xl sm:text-2xl text-gray-900 flex items-baseline gap-2">
+                  <span className="text-gray-400 text-base">{idx + 1}</span>
+                  {member.name}
                 </h3>
-                <span className="text-sm text-gray-500">{member.teams.length}/5 teams</span>
+                <span className="label">{member.teams.length}/5 teams</span>
               </div>
 
               {member.teams.length > 0 ? (
@@ -159,24 +152,24 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                     return (
                       <div
                         key={team.id}
-                        className="bg-green-50 p-3 rounded-lg border border-green-200"
+                        className="bg-gray-50 p-3 rounded-lg border border-gray-200"
                       >
                         {/* Team name with rank */}
                         <div className="flex items-center gap-2">
                           {teamRank && (
-                            <span className="bg-yellow-400 text-yellow-900 text-xs font-bold px-1.5 py-0.5 rounded">
+                            <span className="bg-amber-400 text-amber-950 font-display font-bold text-xs px-1.5 py-0.5 rounded">
                               #{teamRank}
                             </span>
                           )}
-                          <span className="font-semibold text-green-900">{team.name}</span>
+                          <span className="font-semibold text-gray-900">{team.name}</span>
                         </div>
 
                         {/* Conference */}
-                        <div className="text-xs text-green-700">{team.conference}</div>
+                        <div className="label text-[11px]">{team.conference}</div>
 
                         {/* Matchup info */}
                         {league?.draftComplete && (
-                          <div className="mt-2 pt-2 border-t border-green-200">
+                          <div className="mt-2 pt-2 border-t border-gray-200">
                             <div className="flex items-center justify-between">
                               <span
                                 className={`text-sm ${
@@ -188,25 +181,25 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                               {game &&
                                 (teamSpread !== null && teamSpread !== undefined ? (
                                   <span
-                                    className={`text-sm font-medium ${
+                                    className={`font-display font-bold text-base ${
                                       teamSpread >= 3.5
-                                        ? 'text-green-600' // upset-bonus territory (+2 on a win)
+                                        ? 'text-green-700' // upset-bonus territory (+2 on a win)
                                         : teamSpread <= -3.5
-                                        ? 'text-red-500' // bust risk (−1 on a loss)
+                                        ? 'text-red-600' // bust risk (−1 on a loss)
                                         : 'text-gray-600'
                                     }`}
                                     title={
                                       teamSpread >= 3.5
-                                        ? 'Underdog of 3.5+ — a win scores 2'
+                                        ? 'Underdog of 3.5+: a win scores 2'
                                         : teamSpread <= -3.5
-                                        ? 'Favorite by 3.5+ — a loss scores −1'
-                                        : 'Inside the ±3.5 window — regular scoring'
+                                        ? 'Favorite by 3.5+: a loss scores -1'
+                                        : 'Inside the 3.5-point window: regular scoring'
                                     }
                                   >
                                     {formatSpread(teamSpread)}
                                   </span>
                                 ) : (
-                                  <span className="text-xs text-gray-400 italic" title="Books haven't posted a line yet — odds re-sync daily until kickoff">
+                                  <span className="text-xs text-gray-400 italic" title="Books haven't posted a line yet. Odds re-sync daily until kickoff.">
                                     no line yet
                                   </span>
                                 ))}
@@ -223,9 +216,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
             </div>
           ))
         ) : (
-          <div className="bg-white rounded-lg shadow p-4 sm:p-6 text-center text-gray-500">
-            No members yet
-          </div>
+          <div className="card p-6 text-center text-gray-500">No members yet</div>
         )}
       </div>
     </div>

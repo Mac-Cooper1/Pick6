@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leagueApi, adminApi, swapApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
+import { Loading } from './Loading';
 import { Button } from './Button';
 
 interface SettingsTabProps {
@@ -43,7 +44,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     onSuccess: (state) => {
       setSwapMessage(
         state.status === 'OPEN'
-          ? 'Swap window is open — turn order posted in Draft Recap.'
+          ? 'Swap window is open. Turn order is posted in Draft Recap.'
           : 'Swap window closed.'
       );
       queryClient.invalidateQueries({ queryKey: ['swapState', leagueId] });
@@ -149,51 +150,47 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     return now.toISOString().slice(0, 16);
   };
 
-  if (!currentLeague) {
-    return (
-      <div className="p-4 sm:p-6">
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
-        </div>
-      </div>
-    );
-  }
+  if (!currentLeague) return <Loading inline />;
 
   return (
-    <div className="p-4 sm:p-6">
+    <div className="p-4 sm:p-6 max-w-3xl">
+      <div className="mb-4 sm:mb-6">
+        <h2 className="section-title">Settings</h2>
+        <p className="section-sub">{currentLeague.name}</p>
+      </div>
+
       {/* League Info */}
-      <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">League Settings</h2>
-        <div className="grid grid-cols-2 gap-4 text-sm">
+      <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
-            <span className="text-gray-500">League Name:</span>
-            <p className="font-semibold">{currentLeague.name}</p>
+            <span className="label">Join code</span>
+            <p className="font-mono font-bold text-lg tracking-widest text-gray-900">{currentLeague.joinCode}</p>
           </div>
           <div>
-            <span className="text-gray-500">Join Code:</span>
-            <p className="font-mono font-bold text-lg">{currentLeague.joinCode}</p>
+            <span className="label">Season</span>
+            <p className="font-display font-bold text-lg text-gray-900">{currentLeague.seasonYear}</p>
           </div>
           <div>
-            <span className="text-gray-500">Season:</span>
-            <p className="font-semibold">{currentLeague.seasonYear}</p>
+            <span className="label">Players</span>
+            <p className="font-display font-bold text-lg text-gray-900">{currentLeague.memberCount}/{currentLeague.maxPlayers}</p>
           </div>
           <div>
-            <span className="text-gray-500">Members:</span>
-            <p className="font-semibold">{currentLeague.memberCount}/{currentLeague.maxPlayers}</p>
+            <span className="label">Week</span>
+            <p className="font-display font-bold text-lg text-gray-900">{currentLeague.currentWeek}</p>
           </div>
         </div>
       </div>
 
       {/* Draft Status */}
-      <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
-        <h3 className="text-lg font-bold text-gray-800 mb-4">Draft Status</h3>
+      <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
+        <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900 mb-3">Draft Status</h3>
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              currentLeague.draftStatus === 'COMPLETE' ? 'bg-green-100 text-green-800' :
-              currentLeague.draftStatus === 'LIVE' ? 'bg-red-100 text-red-800 animate-pulse' :
-              currentLeague.draftStatus === 'SCHEDULED' ? 'bg-yellow-100 text-yellow-800' :
-              'bg-gray-100 text-gray-800'
+            <span className={`px-3 py-1 rounded-full font-display font-semibold uppercase tracking-wider text-xs border ${
+              currentLeague.draftStatus === 'COMPLETE' ? 'bg-green-50 text-green-800 border-green-200' :
+              currentLeague.draftStatus === 'LIVE' ? 'bg-red-600 text-white border-red-600 animate-pulse' :
+              currentLeague.draftStatus === 'SCHEDULED' ? 'bg-amber-50 text-amber-800 border-amber-200' :
+              'bg-gray-100 text-gray-700 border-gray-200'
             }`}>
               {currentLeague.draftStatus === 'NOT_STARTED' ? 'Not Scheduled' :
                currentLeague.draftStatus === 'SCHEDULED' ? 'Scheduled' :
@@ -212,12 +209,10 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
 
       {/* Commissioner: manual sync */}
       {isCommissioner && (
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
-              Commissioner
-            </span>
-            <h3 className="text-lg font-bold text-gray-800">Scoring</h3>
+        <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="label text-amber-700">Commissioner</span>
+            <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Scoring</h3>
           </div>
           <p className="text-sm text-gray-600 mb-4">
             Scores sync automatically on a schedule. Use this to pull games, odds,
@@ -236,19 +231,17 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
             }}
             disabled={syncMutation.isPending}
           >
-            {syncMutation.isPending ? 'Syncing…' : `Sync Week ${currentLeague.currentWeek} Now`}
+            {syncMutation.isPending ? 'Syncing...' : `Sync Week ${currentLeague.currentWeek} Now`}
           </Button>
         </div>
       )}
 
       {/* Commissioner: week-5 swap window */}
       {isCommissioner && (
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6 mb-4 sm:mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
-              Commissioner
-            </span>
-            <h3 className="text-lg font-bold text-gray-800">Week 5 Swap Window</h3>
+        <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="label text-amber-700">Commissioner</span>
+            <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Week 5 Swap Window</h3>
           </div>
           <p className="text-sm text-gray-600 mb-4">
             Opens automatically once week 5 wraps. Status:{' '}
@@ -293,12 +286,10 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
 
       {/* Commissioner Settings */}
       {isCommissioner ? (
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full font-medium">
-              Commissioner
-            </span>
-            <h3 className="text-lg font-bold text-gray-800">Draft Settings</h3>
+        <div className="card p-4 sm:p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <span className="label text-amber-700">Commissioner</span>
+            <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Draft Settings</h3>
           </div>
 
           {error && <ErrorMessage message={error} />}
@@ -316,25 +307,25 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
             <div className="space-y-6">
               {/* Schedule Draft */}
               <div>
-                <h4 className="font-semibold text-gray-700 mb-3">Schedule Draft</h4>
+                <h4 className="font-semibold text-gray-900 mb-3">Schedule Draft</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-gray-600 mb-1">Date</label>
+                    <label className="block text-sm font-semibold text-gray-800 mb-1.5">Date</label>
                     <input
                       type="date"
                       value={draftDate}
                       onChange={(e) => setDraftDate(e.target.value)}
                       min={new Date().toISOString().split('T')[0]}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      className="w-full px-3.5 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-green-600"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm text-gray-600 mb-1">Time</label>
+                    <label className="block text-sm font-semibold text-gray-800 mb-1.5">Time</label>
                     <input
                       type="time"
                       value={draftTime}
                       onChange={(e) => setDraftTime(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      className="w-full px-3.5 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-green-600"
                     />
                   </div>
                 </div>
@@ -345,7 +336,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
 
               {/* Pick Timer */}
               <div>
-                <h4 className="font-semibold text-gray-700 mb-3">Time Per Pick</h4>
+                <h4 className="font-semibold text-gray-900 mb-3">Time Per Pick</h4>
                 <div className="flex items-center gap-4">
                   <input
                     type="range"
@@ -356,7 +347,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
                     onChange={(e) => setPickDeadline(parseInt(e.target.value))}
                     className="flex-1"
                   />
-                  <span className="font-mono text-lg font-bold text-green-700 w-24 text-right">
+                  <span className="font-display text-2xl font-bold text-green-700 w-20 text-right">
                     {pickDeadline}s
                   </span>
                 </div>
@@ -370,7 +361,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t">
+              <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-gray-200">
                 <Button
                   className="sm:flex-1"
                   onClick={handleScheduleDraft}
@@ -392,8 +383,8 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-          <h3 className="text-lg font-bold text-gray-800 mb-2">Commissioner Settings</h3>
+        <div className="card p-4 sm:p-6">
+          <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900 mb-2">Commissioner Settings</h3>
           <p className="text-gray-600">
             Only the league commissioner can modify draft settings.
           </p>

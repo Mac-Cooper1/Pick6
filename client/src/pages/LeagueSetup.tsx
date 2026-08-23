@@ -5,6 +5,7 @@ import { leagueApi } from '../services/api';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { ErrorMessage } from '../components/ErrorMessage';
+import { Logo } from '../components/Logo';
 
 type FlowMode = 'select' | 'create' | 'join';
 
@@ -86,12 +87,24 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-900 to-green-700 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-2xl p-6 sm:p-8 max-w-md w-full">
-        <h2 className="text-2xl sm:text-3xl font-bold text-green-800 text-center mb-2">
-          Welcome, {user?.name}!
+    <div className="min-h-[100dvh] bg-gray-100">
+      <header className="bg-green-900 h-14 sm:h-16 flex items-center px-4 sm:px-6">
+        <button type="button" onClick={() => navigate('/dashboard')} aria-label="Back to My Leagues">
+          <Logo tone="dark" />
+        </button>
+      </header>
+      <div className="max-w-md mx-auto p-4 sm:p-8">
+        <h2 className="section-title text-3xl sm:text-4xl mb-1">
+          {flowMode === 'create' ? 'Create a league' : flowMode === 'join' ? 'Join a league' : `Welcome, ${user?.name}`}
         </h2>
-        <p className="text-gray-600 text-center mb-6">Let's get you in a league</p>
+        <p className="text-gray-600 mb-6">
+          {flowMode === 'create'
+            ? 'Name it, pick a size, and share the code with your friends.'
+            : flowMode === 'join'
+            ? 'Enter the six-letter code from your commissioner.'
+            : "Let's get you in a league."}
+        </p>
+        <div className="card p-5 sm:p-7">
 
         {error && (
           <div className="mb-4">
@@ -112,11 +125,9 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
 
         {flowMode === 'create' && (
           <form onSubmit={handleCreateLeague} className="space-y-4">
-            <h3 className="text-xl font-semibold mb-4">Create New League</h3>
-
             <Input
               type="text"
-              placeholder="League Name"
+              placeholder="The Saturday Syndicate"
               label="League Name"
               value={leagueName}
               onChange={(e) => setLeagueName(e.target.value)}
@@ -124,13 +135,14 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
             />
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="maxPlayers" className="block text-sm font-semibold text-gray-800 mb-1.5">
                 Max Players
               </label>
               <select
+                id="maxPlayers"
                 value={maxPlayers}
                 onChange={(e) => setMaxPlayers(parseInt(e.target.value))}
-                className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                className="w-full px-3.5 py-3 text-base bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-green-600"
               >
                 {[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((n) => (
                   <option key={n} value={n}>
@@ -142,11 +154,13 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
 
             <Input
               type="text"
-              placeholder="Custom Join Code (optional)"
+              placeholder="Leave blank to generate one"
               label="Custom Join Code (optional)"
+              hint="Up to 6 letters or numbers"
               value={customJoinCode}
               onChange={(e) => setCustomJoinCode(e.target.value.toUpperCase())}
               maxLength={6}
+              className="font-mono tracking-widest uppercase"
             />
 
             <div className="flex gap-2">
@@ -167,15 +181,15 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
 
         {flowMode === 'join' && (
           <form onSubmit={handleJoinLeague} className="space-y-4">
-            <h3 className="text-xl font-semibold mb-4">Join League</h3>
-
             <Input
               type="text"
-              placeholder="Join Code"
+              placeholder="ABC123"
               label="Join Code"
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               maxLength={6}
+              autoCapitalize="characters"
+              className="font-mono tracking-widest uppercase text-xl"
               required
             />
 
@@ -194,6 +208,7 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
             </div>
           </form>
         )}
+        </div>
       </div>
     </div>
   );
