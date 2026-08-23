@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <ellipse cx="50" cy="50" rx="46" ry="29" transform="rotate(-32 50 50)" fill="#8b4513" stroke="#4a2508" stroke-width="4"/>
-  <path d="M34 63 L66 37" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
-  <path d="M40 66l7-8M47 60l7-8M54 54l7-8" stroke="#fff" stroke-width="3.5" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Pick 6 mark: deep-green tile, bold 6, gold goal line. -->
+  <rect width="64" height="64" rx="14" fill="#14532d"/>
+  <text x="32" y="47" text-anchor="middle" font-family="'Barlow Condensed','Arial Narrow','Helvetica Neue',Arial,sans-serif" font-weight="800" font-size="46" fill="#ffffff">6</text>
+  <rect x="16" y="52" width="32" height="4" rx="2" fill="#fbbf24"/>
 </svg>

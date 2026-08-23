@@ -11,6 +11,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { draftApi, rosterApi, swapApi } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
+import { Loading } from './Loading';
 import { Button } from './Button';
 import { DRAFT_SLOTS, SLOT_LABELS, ConferenceSlot, RosterEntry, Team } from '../types';
 
@@ -74,7 +75,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
     mutationFn: () => swapApi.swap(leagueId, swapDrop!.teamId, swapAddId!),
     onSuccess: (data: any) => {
       setSwapSuccess(
-        `Swap complete — your new team counts from week ${data.effectiveFromWeek} on.`
+        `Swap complete. Your new team counts from week ${data.effectiveFromWeek} on.`
       );
       setSwapError(null);
       setSwapDrop(null);
@@ -90,21 +91,13 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
   const passMutation = useMutation({
     mutationFn: () => swapApi.pass(leagueId),
     onSuccess: () => {
-      setSwapSuccess('You passed — you can still swap after everyone has had their turn, until the window closes.');
+      setSwapSuccess('You passed. You can still swap after everyone has had their turn, until the window closes.');
       invalidateAll();
     },
     onError: (err: any) => setSwapError(err.response?.data?.message || 'Pass failed'),
   });
 
-  if (rostersLoading) {
-    return (
-      <div className="p-4 sm:p-6">
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-600"></div>
-        </div>
-      </div>
-    );
-  }
+  if (rostersLoading) return <Loading inline />;
 
   if (rostersError) {
     return (
@@ -135,28 +128,33 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Swap window (visible once opened) */}
       {swapState && swapState.status !== 'NOT_OPEN' && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className={`p-4 text-white ${swapState.status === 'OPEN' ? 'bg-amber-600' : 'bg-gray-500'}`}>
-            <h3 className="font-bold text-lg">
-              Week 5 Swap {swapState.status === 'OPEN' ? '— window open' : '— window closed'}
-            </h3>
+        <div className={`card overflow-hidden ${swapState.status === 'OPEN' ? 'border-amber-300' : ''}`}>
+          <div className={`p-4 ${swapState.status === 'OPEN' ? 'bg-amber-50 border-b border-amber-200' : 'bg-gray-50 border-b border-gray-200'}`}>
+            <div className="flex items-baseline gap-2">
+              <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">
+                Week 5 Swap
+              </h3>
+              <span className={`label ${swapState.status === 'OPEN' ? 'text-amber-700' : 'text-gray-500'}`}>
+                {swapState.status === 'OPEN' ? 'window open' : 'window closed'}
+              </span>
+            </div>
             {swapState.status === 'OPEN' && (
-              <p className="text-amber-100 text-sm">
+              <p className="text-amber-900 text-sm mt-1">
                 One same-slot swap each, worst record first.
                 {swapState.freePhase
-                  ? ' All turns are done — anyone who hasn’t swapped may swap until the commissioner closes the window.'
+                  ? ' All turns are done. Anyone who has not swapped may swap until the commissioner closes the window.'
                   : onTheClockMe
                   ? " It's your turn!"
-                  : ` On the clock: ${onTheClockName ?? '—'}`}
+                  : ` On the clock: ${onTheClockName ?? 'nobody'}.`}
                 {swapState.turnDeadline && !swapState.freePhase && (
-                  <> · turn ends {new Date(swapState.turnDeadline).toLocaleString()}</>
+                  <> Turn ends {new Date(swapState.turnDeadline).toLocaleString()}.</>
                 )}
               </p>
             )}
           </div>
 
           {/* Order strip */}
-          <div className="px-4 py-3 flex flex-wrap gap-2 border-b">
+          <div className="px-4 py-3 flex flex-wrap gap-2 border-b border-gray-200">
             {swapState.order.map((o) => (
               <span
                 key={o.userId}
@@ -172,7 +170,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
                 title={o.swapUsed ? 'Swapped' : o.swapSkipped ? 'Passed' : `Turn ${o.swapOrder}`}
               >
                 {o.swapOrder}. {o.userName}
-                {o.swapUsed && ' ✓'}
+                {o.swapUsed && <span className="ml-1 normal-case opacity-70">swapped</span>}
               </span>
             ))}
           </div>
@@ -254,16 +252,17 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
           )}
 
           {swapState.status === 'OPEN' && myEntry?.swapUsed && (
-            <p className="px-4 pb-4 text-sm text-gray-500">You've used your swap. ✓</p>
+            <p className="px-4 pb-4 text-sm text-gray-500">You've used your swap.</p>
           )}
         </div>
       )}
 
       {/* Rosters by slot */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="bg-green-600 text-white p-4">
-          <h2 className="text-lg font-bold">Draft Recap — Rosters by Slot</h2>
-        </div>
+      <div>
+        <h2 className="section-title">Draft Recap</h2>
+        <p className="section-sub">Everyone's roster, one team per slot</p>
+      </div>
+      <div className="card overflow-hidden">
 
         {!hasAnyRoster ? (
           <p className="p-6 text-gray-500 text-center">
@@ -274,9 +273,9 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="p-2 sm:p-3 text-left text-gray-600 font-semibold sticky left-0 z-10 bg-gray-50 border-r border-gray-200">Player</th>
+                  <th className="label text-left p-2 sm:p-3 sticky left-0 z-10 bg-gray-50 border-r border-gray-200">Player</th>
                   {DRAFT_SLOTS.map((slot) => (
-                    <th key={slot} className="p-2 sm:p-3 text-left text-gray-600 font-semibold min-w-[8.5rem] whitespace-nowrap">
+                    <th key={slot} className="label text-left p-2 sm:p-3 min-w-[8.5rem] whitespace-nowrap">
                       {SLOT_LABELS[slot]}
                     </th>
                   ))}
@@ -297,10 +296,10 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
                     <td className="p-2 sm:p-3 font-semibold text-gray-800 sticky left-0 z-10 bg-inherit border-r border-gray-200 whitespace-nowrap">
                       {member.userName}
                       {member.userId === user?.id && (
-                        <span className="text-green-600 text-xs ml-1">(You)</span>
+                        <span className="label text-green-700 ml-1.5">You</span>
                       )}
                       {member.swapUsed && (
-                        <span className="block text-xs text-amber-600 font-normal">swap used</span>
+                        <span className="block label text-[11px] text-amber-700">swap used</span>
                       )}
                     </td>
                     {DRAFT_SLOTS.map((slot) => {
@@ -314,7 +313,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
                                 {entry.fromWeek > 1 && (
                                   <span
                                     className="ml-1 text-xs text-amber-600"
-                                    title={`Swapped in — counts from week ${entry.fromWeek}`}
+                                    title={`Swapped in. Counts from week ${entry.fromWeek}.`}
                                   >
                                     (wk {entry.fromWeek}+)
                                   </span>
@@ -323,7 +322,7 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
                               <div className="text-xs text-gray-500">{entry.conference}</div>
                             </div>
                           ) : (
-                            <span className="text-gray-300">—</span>
+                            <span className="text-gray-300">-</span>
                           )}
                         </td>
                       );
@@ -338,23 +337,23 @@ export function DraftRecapTab({ leagueId }: DraftRecapTabProps) {
 
       {/* Pick-by-pick order */}
       {picks && picks.length > 0 && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="bg-gray-100 p-4">
-            <h3 className="font-bold text-gray-800">Pick-by-Pick</h3>
+        <div className="card overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200">
+            <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Pick by Pick</h3>
           </div>
-          <div className="divide-y">
+          <div className="divide-y divide-gray-200">
             {Array.from(rounds.entries()).map(([round, roundPicks]) => (
               <div key={round} className="p-4">
-                <h4 className="text-sm font-bold text-gray-500 mb-2">Round {round}</h4>
+                <h4 className="label mb-2">Round {round}</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {roundPicks.map((pick) => (
                     <div
                       key={pick.id}
-                      className={`p-2 rounded text-sm flex items-center gap-2 ${
-                        pick.user.id === user?.id ? 'bg-green-50' : 'bg-gray-50'
+                      className={`p-2 rounded-lg text-sm flex items-center gap-2 border ${
+                        pick.user.id === user?.id ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
                       }`}
                     >
-                      <span className="text-gray-400 font-mono text-xs w-8">#{pick.pickNumber}</span>
+                      <span className="font-display font-bold text-gray-400 w-8">{pick.pickNumber}</span>
                       <div className="flex-1">
                         <span className="font-medium">{pick.team.name}</span>
                         <span className="text-xs text-gray-500 ml-1">

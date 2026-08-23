@@ -49,7 +49,7 @@ api.interceptors.response.use(
       // Clear token and redirect to login
       localStorage.removeItem('pick6_token');
       localStorage.removeItem('pick6_user');
-      window.location.href = '/';
+      if (window.location.pathname !== '/login') window.location.href = '/login';
     }
     return Promise.reject(error);
   }
