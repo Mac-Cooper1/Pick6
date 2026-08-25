@@ -41,7 +41,7 @@ Smaller spreads and pick'ems score as regular results.
 - **Draft Recap**: everyone's roster in a players × slots grid plus the pick-by-pick order
 - **Automated scoring**: ESPN scores + The Odds API spreads → upset detection (±3.5 rule) → weekly rescore, on a GitHub Actions schedule
 - **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-5 swap can never rewrite history
-- **Matchup board**: each rostered team's upcoming opponent, kickoff, and moneyline with AP rank badges
+- **Matchup board**: each rostered team's upcoming opponent, kickoff, and spread (read from the DB — the exact line scoring will use) with AP rank badges
 - **Commissioner tools**: schedule the draft, "Sync now", manual game-result override, member password reset
 - **DB-enforced integrity**: partial unique indexes guarantee one owner per team and one team per slot
 
@@ -49,7 +49,7 @@ Smaller spreads and pick'ems score as regular results.
 
 **Frontend**: React 18 + TypeScript, Vite, Tailwind, React Router, TanStack Query, socket.io-client, Phosphor icons, self-hosted Barlow / Barlow Condensed (`@fontsource`)
 **Backend**: Node/Express + TypeScript, Prisma + PostgreSQL, Socket.IO, JWT + bcrypt
-**Data**: ESPN hidden API (scores, schedules, rankings, season calendar, team/conference membership) + The Odds API (spreads; 500 req/mo free tier, ~90 used)
+**Data**: ESPN hidden API (scores, schedules, rankings, season calendar, team/conference membership) + The Odds API (spreads; 500 credits/mo free tier — only the sync pipeline spends them, ~1 credit per cron run; user traffic reads spreads from the DB)
 
 ## Getting Started (local)
 
@@ -119,7 +119,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 | Rosters | `GET /:id` · `GET /:id/my` · `GET /:id/user/:userId` · `GET /:id/available` · `GET /:id/matchups[/all]` |
 | Standings | `GET /:id/week/:n` · `GET /:id/overall` |
 | Admin | `POST /sync-current` · `POST /sync-calendar/:year` · `POST /sync-week/:id/:n` · `POST /sync-games\|sync-odds\|finalize-games\|sync-all-leagues` · `POST /game-override` · `POST /reset-password` · read-only previews |
-| CFB/Odds | scoreboard, schedule, AP rankings, raw odds (cached 60s–1h) |
+| CFB | scoreboard, schedule, AP rankings (cached 60s–1h) |
 
 ## Project Structure
 
@@ -160,6 +160,11 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Aug 25, 2026** — Odds API quota fix (230 of 500 monthly credits burned before the season even started):
+- **User traffic no longer touches The Odds API.** The League tab's matchup endpoint was fetching live odds (spreads + moneylines = 2 credits) on every 15-minute cache expiry, from an in-memory cache that every deploy wiped — one open League tab cost up to 8 credits/hour, which doesn't survive a football Saturday on the free tier. `matchupService` now reads spreads straight from the `Game` rows the daily 11:00 UTC sync already populates, joined by `espnEventId` (no fuzzy name matching), so the League tab shows the exact line scoring will use and costs 0 credits
+- **`/api/odds/*` routes deleted** — nothing in the client called them; they were a second 2-credit live-fetch path under its own cache key. The admin-gated `GET /api/admin/current-odds` preview (spreads only, manual use) stays
+- Steady-state spend is now just the cron: 1 credit per run, ~65/month. Verified against SMOKE1 (all 10 roster teams matched to stored spreads with correct home/away signs); smoke test 43/43, `tsc` + client build green
 
 **Aug 24, 2026** — QA round 2 (Mac + Johnny's notes from the first real league draft):
 - **Draft clock fixed** (the "adds 15 seconds at zero" bug — three compounding defects, no 15 anywhere in the code): (1) every pick started a 5s deadline-broadcast interval that `clearPickTimer` never cleared, so stale intervals kept emitting the *previous* deadline and clients' clocks jumped between two values — the interval now dies with its timeout; (2) the client counted down on the device clock, so a phone 15s off hit 0:00 early/late and blipped on every server sync — the countdown now runs on a server-clock offset (`serverNow` is in every `draft:timer` and `draft:state` event); (3) autopick's AP-rankings lookup was a live uncached ESPN call — now cached 10 min with a 3s abort timeout (falls back to random, as before)
