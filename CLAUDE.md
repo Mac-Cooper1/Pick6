@@ -22,7 +22,10 @@ turn — standing instruction from Mac)**.
 ## Architecture (monorepo: `server/` + `client/`)
 
 - **Server**: Express + TypeScript, Prisma/Postgres, Socket.IO (live draft
-  only). Key services: `draftService` (slot-aware snake, transactional picks),
+  only). Key services: `draftService` (slot-aware snake, transactional picks;
+  draft order is assigned at *scheduling* time — random or
+  commissioner-manual via `assignDraftOrder` — and `startDraft` respects it,
+  shuffling only members without positions),
   `syncService` (ESPN games → odds → finalize upsets → rescore; idempotent),
   `seasonService` (D6: ESPN week calendar, **current week is derived from the
   clock, never stored**), `swapService` (WS8: turn order, 24h lazy-expiry
@@ -78,6 +81,11 @@ turn — standing instruction from Mac)**.
   {id}/teams`) — realignment is a seed re-run, not a code change.
 
 ## Local dev (this Mac)
+
+**DB queries for context**: read `.claude/db-access.md` (git-ignored) for
+connection strings and Mac's rules — always query through its read-only
+`PGOPTIONS` wrapper; INSERT/UPDATE need Mac's per-case OK; DELETE/DROP never.
+If the file is missing, ask Mac before touching a database.
 
 ```bash
 colima start                      # Docker runtime (not Docker Desktop)
@@ -167,6 +175,12 @@ round 1 (Aug 7) fixed the draft clock / timeout / clear-button / copy items.
 The **mobile design pass** landed Aug 22 and the **visual design pass +
 landing page** landed Aug 23 (type system, brand mark/favicon, scoreboard
 header, Leaderboard showpiece, `/` landing, auth at `/login` — design only,
-no logic touched); both await Mac's on-device review. Next up: the Aug 27–29
-dress rehearsal on real games. Dark mode and landing-page photography are
-parked in NOTES.md.
+no logic touched). **QA round 2 (Aug 24, after the first real draft)**:
+draft clock fixed (stale 5s broadcast intervals killed with their timeout;
+client counts down on a server-clock offset from `serverNow`; autopick's
+ESPN rankings fetch cached 10 min + 3s timeout), search filter now clears
+when its team gets drafted, scheduled drafts get a full **lobby** (room
+renders pre-start with countdown, draft order, presence dots, queue
+building), and commissioners can set the order (random/manual) in Settings.
+Weekly awards / team-points pages and the 2027 six-team question are parked
+in NOTES.md. Next up: the Aug 27–29 dress rehearsal on real games.

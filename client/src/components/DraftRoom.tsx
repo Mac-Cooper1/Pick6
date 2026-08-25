@@ -53,10 +53,17 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     draftStateRef.current = draftState;
   }, [draftState]);
 
-  // Timer state
+  // Timer state. The countdown runs on SERVER time: serverOffsetRef holds
+  // (server clock - device clock), refreshed from every draft:timer and
+  // draft:state event. A phone whose clock is 15s off otherwise hits 0:00
+  // early or late and the clock looks broken.
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const deadlineRef = useRef<Date | null>(null);
+  const serverOffsetRef = useRef<number>(0);
+
+  // Who's connected to the room right now (lobby presence dots)
+  const [presentUserIds, setPresentUserIds] = useState<number[]>([]);
 
   // UI state
   const [searchTerm, setSearchTerm] = useState('');
@@ -107,10 +114,11 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     setActivity(prev => [newItem, ...prev].slice(0, 50)); // Keep last 50
   }, []);
 
-  // Update timer countdown
+  // Update timer countdown (against server time, not the device clock)
   const updateTimer = useCallback(() => {
     if (deadlineRef.current) {
-      const remaining = Math.max(0, deadlineRef.current.getTime() - Date.now());
+      const serverNow = Date.now() + serverOffsetRef.current;
+      const remaining = Math.max(0, deadlineRef.current.getTime() - serverNow);
       setTimeRemaining(remaining);
     }
   }, []);
@@ -137,8 +145,15 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
       onState: (state) => {
         setDraftState(state);
+        if (state.serverNow) {
+          serverOffsetRef.current = new Date(state.serverNow).getTime() - Date.now();
+        }
         if (state.pickDeadline) {
           deadlineRef.current = new Date(state.pickDeadline);
+          updateTimer();
+        } else if (state.draftStatus === 'SCHEDULED' && state.draftScheduledAt) {
+          // Lobby: the clock counts down to the scheduled start
+          deadlineRef.current = new Date(state.draftScheduledAt);
           updateTimer();
         }
         // Invalidate queries to sync REST data
@@ -175,11 +190,19 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
         // Clear selection if the picked team was selected (functional read, no stale closure)
         setSelectedTeam(prev => (prev?.id === pick.teamId ? null : prev));
 
+        // Selecting a team writes its name into the search box. Once that
+        // team is drafted the filter would match nothing and the board looks
+        // like it disappeared, so clear it.
+        setSearchTerm(prev =>
+          prev.trim().toLowerCase() === pick.teamName.toLowerCase() ? '' : prev
+        );
+
         // Invalidate queries
         queryClient.invalidateQueries({ queryKey: ['availableTeams', leagueId] });
       },
 
       onTimer: (timer) => {
+        serverOffsetRef.current = new Date(timer.serverNow).getTime() - Date.now();
         deadlineRef.current = new Date(timer.endsAt);
         setTimeRemaining(timer.msRemaining);
       },
@@ -204,6 +227,10 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
       onQueueUpdated: (data) => {
         setQueue(data.teamIds);
+      },
+
+      onPresence: (data) => {
+        setPresentUserIds(data.userIds);
       },
 
       onError: (error) => {
@@ -247,6 +274,15 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     setSearchTerm('');
     setSelectedTeam(null);
   };
+
+  // In the lobby the queue panel starts open: building it is the whole point
+  const lobbyQueueOpened = useRef(false);
+  useEffect(() => {
+    if (draftState?.draftStatus === 'SCHEDULED' && !lobbyQueueOpened.current) {
+      lobbyQueueOpened.current = true;
+      setShowQueue(true);
+    }
+  }, [draftState?.draftStatus]);
 
   // Timeout protection: while it's your turn, your selected team is silently
   // pinned to the front of your queue — if the clock hits zero, autopick
@@ -295,11 +331,21 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
   const totalRounds = draftState?.rounds ?? DRAFT_SLOTS.length;
 
-  // Format time remaining
+  // Lobby mode: draft is scheduled but not live. Full room renders so
+  // everyone learns the interface and builds a queue before the clock ever
+  // starts; the header counts down to the scheduled start.
+  const isLobby = draftState?.draftStatus === 'SCHEDULED';
+  const firstPicker = draftState?.members.find(m => m.draftPosition === 1);
+
+  // Format time remaining (lobby countdowns can run hours)
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
     const remainingSeconds = seconds % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
     return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
@@ -347,19 +393,16 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     );
   }
 
-  // Render pre-draft state
-  if (draftState.draftStatus === 'NOT_STARTED' || draftState.draftStatus === 'SCHEDULED') {
+  // Render pre-draft state. Only for an unscheduled draft: once a draft is
+  // scheduled the full room renders below in lobby mode.
+  if (draftState.draftStatus === 'NOT_STARTED') {
     return (
       <div className="p-4 sm:p-6">
         <div className="card p-6 sm:p-10 text-center max-w-2xl mx-auto">
           <h2 className="section-title mb-3">Draft Room</h2>
 
           <div className="mb-8">
-            <span className={`inline-block px-4 py-1.5 rounded-full font-display font-semibold uppercase tracking-wider text-sm border ${
-              draftState.draftStatus === 'SCHEDULED'
-                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                : 'bg-gray-100 text-gray-700 border-gray-200'
-            }`}>
+            <span className="inline-block px-4 py-1.5 rounded-full font-display font-semibold uppercase tracking-wider text-sm border bg-gray-100 text-gray-700 border-gray-200">
               {getStatusDisplay()}
             </span>
           </div>
@@ -390,15 +433,13 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
             </div>
           </div>
 
-          {isCommissioner && draftState.draftStatus !== 'SCHEDULED' && (
+          {isCommissioner ? (
             <Button size="lg" onClick={handleStartDraft}>
               Start Draft Now
             </Button>
-          )}
-
-          {draftState.draftStatus === 'SCHEDULED' && (
+          ) : (
             <p className="text-sm text-gray-500 mt-4">
-              Draft will start automatically at the scheduled time
+              The commissioner can schedule the draft in Settings
             </p>
           )}
 
@@ -485,8 +526,17 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
         <div className="flex items-center justify-between gap-3 sm:gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="inline-block w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
-              <span className="font-display font-bold uppercase tracking-wider text-red-300">Live</span>
+              {isLobby ? (
+                <>
+                  <span className="inline-block w-2.5 h-2.5 bg-amber-400 rounded-full"></span>
+                  <span className="font-display font-bold uppercase tracking-wider text-amber-300">Lobby</span>
+                </>
+              ) : (
+                <>
+                  <span className="inline-block w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
+                  <span className="font-display font-bold uppercase tracking-wider text-red-300">Live</span>
+                </>
+              )}
               {/* Connection status: dot only on phones, dot + label from sm up */}
               <span
                 className="flex items-center gap-1 text-xs text-white/50"
@@ -497,9 +547,18 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
               </span>
             </div>
             <p className="text-white/70 text-xs sm:text-sm mt-0.5 whitespace-nowrap">
-              Pick {draftState.currentPickNumber} of {draftState.totalPicks}
-              <span className="hidden sm:inline">{' '}(Round {draftState.currentRound})</span>
-              <span className="sm:hidden">{' '}/ Rd {draftState.currentRound}</span>
+              {isLobby ? (
+                <>
+                  <span className="hidden sm:inline">Look around, build your queue</span>
+                  <span className="sm:hidden">Build your queue</span>
+                </>
+              ) : (
+                <>
+                  Pick {draftState.currentPickNumber} of {draftState.totalPicks}
+                  <span className="hidden sm:inline">{' '}(Round {draftState.currentRound})</span>
+                  <span className="sm:hidden">{' '}/ Rd {draftState.currentRound}</span>
+                </>
+              )}
             </p>
           </div>
 
@@ -510,14 +569,20 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
             }`}>
               {formatTime(timeRemaining)}
             </div>
-            <p className="font-display uppercase tracking-wider text-[11px] sm:text-xs text-white/60 mt-1">Time remaining</p>
+            <p className="font-display uppercase tracking-wider text-[11px] sm:text-xs text-white/60 mt-1">
+              {isLobby ? 'Until draft starts' : 'Time remaining'}
+            </p>
           </div>
 
-          {/* On the Clock */}
+          {/* On the Clock (lobby: who picks first) */}
           <div className="text-right min-w-0">
-            <p className="font-display uppercase tracking-wider text-[11px] sm:text-xs text-white/60">On the clock</p>
-            <p className={`font-display font-bold uppercase tracking-wide text-base sm:text-2xl leading-tight truncate ${isMyTurn ? 'text-amber-300' : 'text-white'}`}>
-              {isMyTurn ? (
+            <p className="font-display uppercase tracking-wider text-[11px] sm:text-xs text-white/60">
+              {isLobby ? 'First pick' : 'On the clock'}
+            </p>
+            <p className={`font-display font-bold uppercase tracking-wide text-base sm:text-2xl leading-tight truncate ${isMyTurn || (isLobby && firstPicker?.userId === user?.id) ? 'text-amber-300' : 'text-white'}`}>
+              {isLobby ? (
+                firstPicker ? (firstPicker.userId === user?.id ? 'You' : firstPicker.name) : 'TBD'
+              ) : isMyTurn ? (
                 <>
                   {/* Shorter on phones so it never truncates next to the timer */}
                   <span className="sm:hidden">Your turn</span>
@@ -764,6 +829,47 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
         {/* Sidebar - Activity + Queue + Roster */}
         <div className="contents lg:block lg:space-y-4">
+          {/* Draft Order (lobby only; the board header carries it once live) */}
+          {isLobby && (
+            <div className="order-1 lg:order-none card overflow-hidden">
+              <div className="px-3 py-2.5 border-b border-gray-200 flex items-center justify-between">
+                <h3 className="font-display font-bold uppercase tracking-wide text-lg text-gray-900">Draft Order</h3>
+                <span className="text-xs text-gray-500">{presentUserIds.length} here</span>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {draftState.members.map(member => {
+                  const isHere = presentUserIds.includes(member.userId);
+                  const isMe = member.userId === user?.id;
+                  return (
+                    <div key={member.userId} className={`p-2.5 flex items-center gap-3 ${isMe ? 'bg-green-50' : ''}`}>
+                      <span className="font-display font-bold text-lg text-gray-400 w-6 text-center">
+                        {member.draftPosition ?? '?'}
+                      </span>
+                      <span className={`flex-1 truncate text-sm ${isMe ? 'font-semibold text-green-900' : 'font-medium text-gray-800'}`}>
+                        {member.name}
+                        {isMe && ' (You)'}
+                      </span>
+                      <span
+                        className={`w-2 h-2 rounded-full ${isHere ? 'bg-green-500' : 'bg-gray-300'}`}
+                        title={isHere ? 'In the room' : 'Not connected'}
+                      ></span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="px-3 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-200">
+                The draft starts automatically when the clock hits zero. Snake order: round 2 reverses.
+              </div>
+              {isCommissioner && (
+                <div className="p-3 border-t border-gray-200">
+                  <Button size="sm" className="w-full" onClick={handleStartDraft}>
+                    Start draft now
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Activity Feed */}
           <div className="order-6 lg:order-none card overflow-hidden">
             <div className="px-3 py-2.5 border-b border-gray-200">

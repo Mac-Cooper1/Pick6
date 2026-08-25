@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { CaretUp, CaretDown } from '@phosphor-icons/react';
 import { leagueApi, adminApi, swapApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
@@ -27,6 +28,8 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   const [draftDate, setDraftDate] = useState('');
   const [draftTime, setDraftTime] = useState('');
   const [pickDeadline, setPickDeadline] = useState(90);
+  const [orderMode, setOrderMode] = useState<'random' | 'manual'>('random');
+  const [manualOrder, setManualOrder] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
@@ -75,18 +78,42 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   useEffect(() => {
     if (currentLeague) {
       if (currentLeague.draftScheduledAt) {
+        // Local date components, NOT toISOString(): the UTC date can be a day
+        // ahead of the local evening, which silently moved re-saved drafts
         const date = new Date(currentLeague.draftScheduledAt);
-        setDraftDate(date.toISOString().split('T')[0]);
-        setDraftTime(date.toTimeString().slice(0, 5));
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        setDraftDate(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`);
+        setDraftTime(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
       }
+      // Seed the manual-order list: assigned order if one exists, join order otherwise
+      const members = [...(currentLeague.members || [])];
+      const hasOrder = members.some(m => m.draftPosition !== null);
+      if (hasOrder) {
+        members.sort((a, b) => (a.draftPosition ?? 99) - (b.draftPosition ?? 99));
+      }
+      setManualOrder(members.map(m => m.id));
     }
   }, [currentLeague]);
+
+  const memberName = (userId: number) =>
+    currentLeague?.members?.find(m => m.id === userId)?.name || 'Unknown';
+
+  const moveMember = (index: number, direction: -1 | 1) => {
+    setManualOrder(prev => {
+      const target = index + direction;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
 
   // Update settings mutation
   const updateSettingsMutation = useMutation({
     mutationFn: async (settings: {
       draftScheduledAt?: string | null;
       pickDeadlineSeconds?: number;
+      draftOrder?: number[] | 'randomize';
     }) => {
       return leagueApi.updateSettings(leagueId, settings);
     },
@@ -119,7 +146,14 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     updateSettingsMutation.mutate({
       draftScheduledAt: scheduledAt.toISOString(),
       pickDeadlineSeconds: pickDeadline,
+      // Random mode leaves draftOrder unset: the server randomizes on first
+      // schedule and keeps an existing order after that
+      draftOrder: orderMode === 'manual' ? manualOrder : undefined,
     });
+  };
+
+  const handleShuffleOrder = () => {
+    updateSettingsMutation.mutate({ draftOrder: 'randomize' });
   };
 
   const handleClearSchedule = () => {
@@ -358,6 +392,83 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
                 <p className="text-xs text-gray-500 mt-2">
                   Auto-pick triggers when timer expires
                 </p>
+              </div>
+
+              {/* Draft Order */}
+              <div>
+                <h4 className="font-semibold text-gray-900 mb-1">Draft Order</h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Set when you schedule the draft, so everyone sees it in the lobby.
+                  Snake order: round 2 reverses.
+                </p>
+                <div className="flex gap-4 mb-3">
+                  <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="orderMode"
+                      checked={orderMode === 'random'}
+                      onChange={() => setOrderMode('random')}
+                      className="accent-green-700"
+                    />
+                    Random
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="orderMode"
+                      checked={orderMode === 'manual'}
+                      onChange={() => setOrderMode('manual')}
+                      className="accent-green-700"
+                    />
+                    Set manually
+                  </label>
+                </div>
+                {orderMode === 'manual' && (
+                  <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-3">
+                    {manualOrder.map((userId, index) => (
+                      <div key={userId} className="p-2 flex items-center gap-3">
+                        <span className="font-display font-bold text-lg text-gray-400 w-6 text-center">{index + 1}</span>
+                        <span className="flex-1 text-sm font-medium text-gray-800 truncate">
+                          {memberName(userId)}
+                          {userId === user?.id && ' (You)'}
+                        </span>
+                        <button
+                          onClick={() => moveMember(index, -1)}
+                          disabled={index === 0}
+                          className="w-9 h-9 flex items-center justify-center rounded-full text-gray-500 hover:text-gray-800 hover:bg-gray-100 active:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Move up"
+                          aria-label={`Move ${memberName(userId)} up`}
+                        >
+                          <CaretUp size={16} weight="bold" />
+                        </button>
+                        <button
+                          onClick={() => moveMember(index, 1)}
+                          disabled={index === manualOrder.length - 1}
+                          className="w-9 h-9 flex items-center justify-center rounded-full text-gray-500 hover:text-gray-800 hover:bg-gray-100 active:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Move down"
+                          aria-label={`Move ${memberName(userId)} down`}
+                        >
+                          <CaretDown size={16} weight="bold" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {currentLeague.draftStatus === 'SCHEDULED' && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleShuffleOrder}
+                      disabled={updateSettingsMutation.isPending}
+                    >
+                      Shuffle order now
+                    </Button>
+                    <span className="text-xs text-gray-500">
+                      Players see the new order in the lobby right away
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Action Buttons */}

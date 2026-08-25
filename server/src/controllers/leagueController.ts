@@ -3,6 +3,8 @@ import { AuthRequest, CreateLeagueRequest, JoinLeagueRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { generateJoinCode, validateJoinCode } from '../utils/joinCode';
 import { getCurrentWeek } from '../services/seasonService';
+import { assignDraftOrder, getDraftState } from '../services/draftService';
+import { getIOInstance } from '../socket/draftSocket';
 import prisma from '../lib/prisma';
 import { MemberRole, DraftStatus } from '@prisma/client';
 
@@ -142,11 +144,17 @@ export async function joinLeague(req: AuthRequest, res: Response, next: any) {
       });
     }
 
-    // Add user as member
+    // Add user as member. If a draft order was already assigned (lobby shows
+    // it), a late joiner slots in at the end instead of breaking the order.
+    const maxPosition = Math.max(
+      0,
+      ...league.members.map((m) => m.draftPosition ?? 0)
+    );
     await prisma.leagueMember.create({
       data: {
         leagueId: league.id,
         userId,
+        draftPosition: maxPosition > 0 ? maxPosition + 1 : null,
       },
     });
 
@@ -353,6 +361,7 @@ export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
             id: m.user.id,
             name: m.user.name,
             role: m.role,
+            draftPosition: m.draftPosition,
           })),
         };
       })
@@ -372,7 +381,7 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
   try {
     const userId = req.userId!;
     const leagueId = parseInt(req.params.leagueId);
-    const { draftScheduledAt, pickDeadlineSeconds } = req.body;
+    const { draftScheduledAt, pickDeadlineSeconds, draftOrder } = req.body;
 
     if (isNaN(leagueId)) {
       throw new AppError('Invalid league ID', 400);
@@ -429,12 +438,46 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
       data: updateData,
     });
 
+    // Draft order: 'randomize' shuffles, an array of userIds sets it
+    // explicitly. Scheduling a draft with no order yet also randomizes, so
+    // the lobby always has an order to show.
+    let memberOrder = null;
+    try {
+      if (draftOrder === 'randomize') {
+        memberOrder = await assignDraftOrder(leagueId);
+      } else if (Array.isArray(draftOrder)) {
+        if (draftOrder.some((id: any) => typeof id !== 'number')) {
+          throw new AppError('Draft order must be a list of member user IDs', 400);
+        }
+        memberOrder = await assignDraftOrder(leagueId, draftOrder);
+      } else if (updateData.draftScheduledAt) {
+        const hasOrder = await prisma.leagueMember.findFirst({
+          where: { leagueId, draftPosition: { not: null } },
+        });
+        if (!hasOrder) {
+          memberOrder = await assignDraftOrder(leagueId);
+        }
+      }
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError(err.message || 'Failed to set draft order', 400);
+    }
+
+    // Push the fresh state to anyone already sitting in the lobby, so a
+    // schedule change or reshuffle shows up without a rejoin
+    const io = getIOInstance();
+    if (io) {
+      const state = await getDraftState(leagueId);
+      io.to(`league:${leagueId}`).emit('draft:state', state);
+    }
+
     res.json({
       id: updatedLeague.id,
       name: updatedLeague.name,
       draftScheduledAt: updatedLeague.draftScheduledAt,
       draftStatus: updatedLeague.draftStatus,
       pickDeadlineSeconds: updatedLeague.pickDeadlineSeconds,
+      memberOrder,
     });
   } catch (error) {
     next(error);
