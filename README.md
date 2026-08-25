@@ -161,6 +161,12 @@ pick6/
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
 
+**Aug 25, 2026** — Signup asks for first + last name (form-level split, no DB change):
+- The signup form now collects **First name** and **Last name** (side by side on desktop, stacked on phones, proper `given-name`/`family-name` autocomplete) and submits them as one string into the existing `User.name` column. Deliberately **not** a schema migration: the DB is live prod, every display surface reads `name`, and backfilling a split from existing values means guessing where nicknames break. If dedicated columns are ever wanted (e.g. "J. Kirven" short forms on tight board columns), that's an offseason migration — by then all post-change signups are guaranteed clean two-part names
+- Server `register` normalizes the name (trim, collapse inner whitespace, 60-char cap) but stays one-field lenient so scripts and tests that create one-word users keep working
+- Existing accounts are untouched; any nickname-y names among the real league can be fixed with a couple of hand-approved `UPDATE`s (see `.claude/db-access.md` rules)
+- Verified: headless-Chrome signup at 375×812 (typed `"  Testy "` / `"  McNameface "` → stored `"Testy McNameface"`, redirected to dashboard); smoke 43/43, `tsc` + build green both sides
+
 **Aug 25, 2026** — Odds API quota fix (230 of 500 monthly credits burned before the season even started):
 - **User traffic no longer touches The Odds API.** The League tab's matchup endpoint was fetching live odds (spreads + moneylines = 2 credits) on every 15-minute cache expiry, from an in-memory cache that every deploy wiped — one open League tab cost up to 8 credits/hour, which doesn't survive a football Saturday on the free tier. `matchupService` now reads spreads straight from the `Game` rows the daily 11:00 UTC sync already populates, joined by `espnEventId` (no fuzzy name matching), so the League tab shows the exact line scoring will use and costs 0 credits
 - **`/api/odds/*` routes deleted** — nothing in the client called them; they were a second 2-credit live-fetch path under its own cache key. The admin-gated `GET /api/admin/current-odds` preview (spreads only, manual use) stays

@@ -14,7 +14,10 @@ export function Login() {
   const { user, isLoading: authLoading, register, login } = useAuth();
 
   const authMode: AuthMode = params.get('mode') === 'signup' ? 'signup' : 'signin';
-  const [name, setName] = useState('');
+  // Collected as first + last but stored as one name: the User table keeps a
+  // single (live, prod) name column, so the split lives only in this form
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -37,8 +40,8 @@ export function Login() {
     }
 
     if (authMode === 'signup') {
-      if (!name) {
-        setError('Name is required');
+      if (!firstName.trim() || !lastName.trim()) {
+        setError('First and last name are required');
         return;
       }
       if (password.length < 8) {
@@ -51,7 +54,8 @@ export function Login() {
 
     try {
       if (authMode === 'signup') {
-        await register(name, email, password);
+        const fullName = `${firstName.trim()} ${lastName.trim()}`.replace(/\s+/g, ' ');
+        await register(fullName, email, password);
         navigate('/dashboard');
       } else {
         try {
@@ -130,15 +134,26 @@ export function Login() {
 
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               {authMode === 'signup' && (
-                <Input
-                  label="Name"
-                  type="text"
-                  placeholder="What your friends call you"
-                  autoComplete="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input
+                    label="First name"
+                    type="text"
+                    placeholder="Johnny"
+                    autoComplete="given-name"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    required
+                  />
+                  <Input
+                    label="Last name"
+                    type="text"
+                    placeholder="Football"
+                    autoComplete="family-name"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    required
+                  />
+                </div>
               )}
 
               <Input

@@ -21,6 +21,17 @@ export async function register(req: Request, res: Response, next: any) {
       throw new AppError('Name, email, and password are required', 400);
     }
 
+    // Normalize whitespace; the signup form collects first + last but the
+    // API contract stays a single name (scripts and tests create one-word
+    // users, so no two-word requirement here)
+    const normalizedName = String(name).trim().replace(/\s+/g, ' ');
+    if (!normalizedName) {
+      throw new AppError('Name is required', 400);
+    }
+    if (normalizedName.length > 60) {
+      throw new AppError('Name must be 60 characters or fewer', 400);
+    }
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       throw new AppError('Invalid email format', 400);
@@ -42,7 +53,7 @@ export async function register(req: Request, res: Response, next: any) {
 
     const user = await prisma.user.create({
       data: {
-        name,
+        name: normalizedName,
         email,
         passwordHash,
       },
