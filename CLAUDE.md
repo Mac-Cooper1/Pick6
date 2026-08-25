@@ -30,7 +30,10 @@ turn — standing instruction from Mac)**.
   `seasonService` (D6: ESPN week calendar, **current week is derived from the
   clock, never stored**), `swapService` (WS8: turn order, 24h lazy-expiry
   clock, effective-week roster math), `teamMatcher` (`wasUpset` holds the
-  ±3.5 threshold), `espnClient`, `oddsClient`, in-memory `cacheService`.
+  ±3.5 threshold), `espnClient`, `oddsClient`, `matchupService` (League tab
+  matchups — reads spreads from `Game` rows by `espnEventId`, **never** the
+  live Odds API: 500 free credits/month, only the sync pipeline may spend
+  them), in-memory `cacheService`.
 - **Client**: React 18 + Vite + Tailwind + TanStack Query. Routes: `/` =
   marketing landing (signed-out; signed-in users bounce to `/dashboard`),
   `/login` (`?mode=signup`), `/dashboard`, `/league/create|join`,
@@ -183,4 +186,8 @@ when its team gets drafted, scheduled drafts get a full **lobby** (room
 renders pre-start with countdown, draft order, presence dots, queue
 building), and commissioners can set the order (random/manual) in Settings.
 Weekly awards / team-points pages and the 2027 six-team question are parked
-in NOTES.md. Next up: the Aug 27–29 dress rehearsal on real games.
+in NOTES.md. **Aug 25**: Odds API quota fix — user traffic (League tab
+matchups, old `/api/odds` routes) was burning ~8 credits/hour of the
+500/month free tier; matchups now read stored spreads from `Game` rows and
+the `/api/odds` routes are deleted, leaving the cron as the only spender
+(~65 credits/month). Next up: the Aug 27–29 dress rehearsal on real games.

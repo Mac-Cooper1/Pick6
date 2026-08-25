@@ -100,13 +100,6 @@ export async function fetchNCAAFOdds(
 }
 
 /**
- * Fetch head-to-head odds (moneyline)
- */
-export async function fetchNCAAFMoneyline(): Promise<OddsEvent[]> {
-  return fetchNCAAFOdds(['h2h']);
-}
-
-/**
  * Fetch spreads only
  */
 export async function fetchNCAAFSpreads(): Promise<OddsEvent[]> {

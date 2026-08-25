@@ -103,7 +103,6 @@ const cacheService = new CacheService();
 export const CACHE_TTL = {
   ESPN_SCOREBOARD: 60, // 1 minute for live scores
   ESPN_SCHEDULE: 300, // 5 minutes for schedule
-  ODDS_API: 900, // 15 minutes for odds (protect free tier)
   TEAM_MATCHUPS: 300, // 5 minutes for matchup data
 } as const;
 

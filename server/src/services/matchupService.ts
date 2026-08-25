@@ -1,14 +1,17 @@
 /**
  * Matchup Service
  *
- * Combines roster data with ESPN scores and Odds API data
- * to provide matchup information for each team on a user's roster
+ * Combines roster data with ESPN scores and stored betting lines
+ * to provide matchup information for each team on a user's roster.
+ *
+ * Spreads come from the Game table (attached by the daily odds sync before
+ * kickoff), NOT from a live Odds API call — user traffic must never spend
+ * Odds API quota, and the stored spread is the one scoring actually uses.
  */
 
 import prisma from '../lib/prisma';
 import cacheService, { CACHE_TTL } from './cacheService';
 import { fetchScoreboard, parseScoreboardGames, ParsedGame } from './espnClient';
-import { fetchNCAAFOdds, isOddsApiConfigured } from './oddsClient';
 import { getCurrentWeek } from './seasonService';
 
 // Normalize team names for matching
@@ -221,9 +224,8 @@ function findGameForTeam(
   return null;
 }
 
-interface OddsData {
-  homeTeam: string;
-  awayTeam: string;
+interface StoredGameOdds {
+  espnEventId: string;
   spread: number | null;
   homeMoneyline: number | null;
   awayMoneyline: number | null;
@@ -231,38 +233,29 @@ interface OddsData {
 }
 
 /**
- * Find odds for a specific game
+ * Load stored odds for a week's games, keyed by ESPN event id — no name
+ * matching needed since matchups and Game rows share espnEventId.
  */
-function findOddsForGame(
-  homeTeamName: string,
-  awayTeamName: string,
-  oddsData: OddsData[]
-): OddsData | null {
-  const homeNorm = normalizeTeamName(homeTeamName);
-  const awayNorm = normalizeTeamName(awayTeamName);
+async function getStoredOddsByEventId(
+  seasonYear: number,
+  weekNumber: number
+): Promise<Map<string, StoredGameOdds>> {
+  const games = await prisma.game.findMany({
+    where: {
+      seasonYear,
+      weekNumber,
+      spread: { not: null },
+    },
+    select: {
+      espnEventId: true,
+      spread: true,
+      homeMoneyline: true,
+      awayMoneyline: true,
+      bookmaker: true,
+    },
+  });
 
-  for (const odds of oddsData) {
-    const oddsHomeNorm = normalizeTeamName(odds.homeTeam);
-    const oddsAwayNorm = normalizeTeamName(odds.awayTeam);
-
-    const homeMatch =
-      oddsHomeNorm.includes(homeNorm) ||
-      homeNorm.includes(oddsHomeNorm) ||
-      homeNorm.slice(0, 6) === oddsHomeNorm.slice(0, 6);
-
-    const awayMatch =
-      oddsAwayNorm.includes(awayNorm) ||
-      awayNorm.includes(oddsAwayNorm) ||
-      awayNorm.slice(0, 6) === oddsAwayNorm.slice(0, 6);
-
-    if (homeMatch && awayMatch) {
-      return odds;
-    }
-  }
-
-  // Log mismatch for debugging
-  console.log(`[Matchup] No odds found for ${homeTeamName} vs ${awayTeamName}`);
-  return null;
+  return new Map(games.map((g) => [g.espnEventId, g]));
 }
 
 /**
@@ -353,61 +346,8 @@ export async function getRosterMatchups(
     }
   }
 
-  // Get odds data (cached)
-  let oddsData: OddsData[] = [];
-  if (isOddsApiConfigured()) {
-    const oddsCacheKey = 'matchups:odds:ncaaf';
-    const cachedOdds = cacheService.get<OddsData[]>(oddsCacheKey);
-
-    if (cachedOdds) {
-      oddsData = cachedOdds;
-    } else {
-      try {
-        const oddsEvents = await fetchNCAAFOdds(['spreads', 'h2h']);
-        oddsData = oddsEvents.map((event) => {
-          let spread: number | null = null;
-          let homeMoneyline: number | null = null;
-          let awayMoneyline: number | null = null;
-          let bookmaker: string | null = null;
-
-          for (const bm of event.bookmakers) {
-            if (spread === null) {
-              const spreadMarket = bm.markets.find((m) => m.key === 'spreads');
-              if (spreadMarket) {
-                const homeOutcome = spreadMarket.outcomes.find((o) => o.name === event.home_team);
-                if (homeOutcome?.point !== undefined) {
-                  spread = homeOutcome.point;
-                  bookmaker = bm.title;
-                }
-              }
-            }
-            if (homeMoneyline === null) {
-              const h2hMarket = bm.markets.find((m) => m.key === 'h2h');
-              if (h2hMarket) {
-                const homeH2h = h2hMarket.outcomes.find((o) => o.name === event.home_team);
-                const awayH2h = h2hMarket.outcomes.find((o) => o.name === event.away_team);
-                if (homeH2h) homeMoneyline = homeH2h.price;
-                if (awayH2h) awayMoneyline = awayH2h.price;
-              }
-            }
-            if (spread !== null && homeMoneyline !== null) break;
-          }
-
-          return {
-            homeTeam: event.home_team,
-            awayTeam: event.away_team,
-            spread,
-            homeMoneyline,
-            awayMoneyline,
-            bookmaker,
-          };
-        });
-        cacheService.set(oddsCacheKey, oddsData, CACHE_TTL.ODDS_API);
-      } catch (error) {
-        console.error('[Matchup] Error fetching odds:', error);
-      }
-    }
-  }
+  // Stored odds for the week's games (DB only — never the live Odds API)
+  const oddsByEventId = await getStoredOddsByEventId(seasonYear, week);
 
   // Build matchup data for each rostered team
   const matchups: TeamMatchup[] = rosterSlots.map((rt) => {
@@ -438,12 +378,8 @@ export async function getRosterMatchups(
         venue: game.venue,
       };
 
-      // Find odds for this game
-      const gameOdds = findOddsForGame(
-        game.homeTeam.displayName,
-        game.awayTeam.displayName,
-        oddsData
-      );
+      // Look up stored odds by ESPN event id
+      const gameOdds = oddsByEventId.get(game.espnEventId);
 
       if (gameOdds) {
         matchup.odds = {

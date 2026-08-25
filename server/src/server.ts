@@ -24,7 +24,6 @@ import standingsRoutes from './routes/standings';
 import adminRoutes from './routes/admin';
 import rosterRoutes from './routes/rosters';
 import cfbRoutes from './routes/cfb';
-import oddsRoutes from './routes/odds';
 
 const app: Application = express();
 const httpServer = createServer(app);
@@ -66,7 +65,6 @@ app.use('/api/standings', standingsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/rosters', rosterRoutes);
 app.use('/api/cfb', cfbRoutes);
-app.use('/api/odds', oddsRoutes);
 
 // Single-service deployment: serve the built client from the same origin
 // (kills CORS and build-time API URLs entirely). The client build lives at
