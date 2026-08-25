@@ -190,4 +190,7 @@ in NOTES.md. **Aug 25**: Odds API quota fix — user traffic (League tab
 matchups, old `/api/odds` routes) was burning ~8 credits/hour of the
 500/month free tier; matchups now read stored spreads from `Game` rows and
 the `/api/odds` routes are deleted, leaving the cron as the only spender
-(~65 credits/month). Next up: the Aug 27–29 dress rehearsal on real games.
+(~65 credits/month). Also Aug 25: signup collects first + last name but joins
+them into the single `User.name` column (deliberately no migration — DB is
+live prod; server `register` normalizes whitespace, stays one-field lenient
+for scripts). Next up: the Aug 27–29 dress rehearsal on real games.
