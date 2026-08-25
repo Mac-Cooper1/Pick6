@@ -91,7 +91,7 @@ export interface MyLeague {
     rank: number | null;
     totalMembers: number;
   };
-  members: Array<{ id: number; name: string; role: string }>;
+  members: Array<{ id: number; name: string; role: string; draftPosition: number | null }>;
 }
 
 // League API
@@ -124,6 +124,7 @@ export const leagueApi = {
   updateSettings: async (leagueId: number, settings: {
     draftScheduledAt?: string | null;
     pickDeadlineSeconds?: number;
+    draftOrder?: number[] | 'randomize';
   }): Promise<any> => {
     const { data } = await api.patch(`/leagues/${leagueId}/settings`, settings);
     return data;

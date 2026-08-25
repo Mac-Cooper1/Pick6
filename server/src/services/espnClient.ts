@@ -449,7 +449,9 @@ export async function fetchRankings(): Promise<RankingsResponse> {
 
   console.log(`[ESPN] Fetching rankings: ${url}`);
 
-  const response = await fetch(url);
+  // Hard timeout: autopick calls this while a player's clock sits at 0:00 —
+  // a slow ESPN response must fail fast so autopick falls back to random.
+  const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
 
   if (!response.ok) {
     throw new Error(`ESPN Rankings API error: ${response.status} ${response.statusText}`);
@@ -487,9 +489,19 @@ export async function fetchRankings(): Promise<RankingsResponse> {
 }
 
 /**
- * Get a map of ESPN team ID to rank (for quick lookups)
+ * Get a map of ESPN team ID to rank (for quick lookups).
+ * Cached for 10 minutes — rankings change weekly, and autopick must never
+ * wait on a live ESPN round-trip.
  */
 export async function getRankingsMap(): Promise<Map<string, number>> {
+  const cacheService = (await import('./cacheService')).default;
+  const cacheKey = 'espn:rankings:map';
+
+  const cached = cacheService.get<Map<string, number>>(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const rankings = await fetchRankings();
   const map = new Map<string, number>();
 
@@ -499,5 +511,6 @@ export async function getRankingsMap(): Promise<Map<string, number>> {
     }
   }
 
+  cacheService.set(cacheKey, map, 600);
   return map;
 }

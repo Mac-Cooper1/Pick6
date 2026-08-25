@@ -27,8 +27,14 @@ interface DraftSocket extends Socket {
   leagueId?: number;
 }
 
-// Active draft timers (leagueId -> timeout handle)
-const draftTimers: Map<number, NodeJS.Timeout> = new Map();
+// Active draft timers (leagueId -> autopick timeout + 5s broadcast interval).
+// Both handles must die together: a surviving broadcast interval keeps
+// emitting a stale deadline and the clients' clocks jump around.
+interface PickTimer {
+  timeout: NodeJS.Timeout;
+  broadcastInterval: NodeJS.Timeout;
+}
+const draftTimers: Map<number, PickTimer> = new Map();
 
 // Active draft check intervals (for scheduled drafts)
 const draftCheckIntervals: Map<number, NodeJS.Timeout> = new Map();
@@ -93,6 +99,9 @@ export function initDraftSocket(io: Server) {
           userId,
           timestamp: new Date().toISOString(),
         });
+
+        // Everyone (including the joiner) gets the fresh presence roster
+        await broadcastPresence(io, leagueId);
 
         // If draft is live, start/sync the timer
         if (state.draftStatus === 'LIVE' && state.pickDeadline) {
@@ -230,9 +239,31 @@ export function initDraftSocket(io: Server) {
           userId: socket.userId,
           timestamp: new Date().toISOString(),
         });
+        broadcastPresence(io, socket.leagueId);
       }
     });
   });
+}
+
+/**
+ * Broadcast which league members are currently connected to the room.
+ * Drives the presence dots in the pre-draft lobby.
+ */
+async function broadcastPresence(io: Server, leagueId: number) {
+  try {
+    const roomName = `league:${leagueId}`;
+    const sockets = await io.in(roomName).fetchSockets();
+    const userIds = [
+      ...new Set(
+        sockets
+          .map((s) => (s as unknown as DraftSocket).userId)
+          .filter((id): id is number => id !== undefined)
+      ),
+    ];
+    io.to(roomName).emit('draft:presence', { userIds });
+  } catch (error) {
+    console.error(`[Socket] Error broadcasting presence for league ${leagueId}:`, error);
+  }
 }
 
 /**
@@ -260,17 +291,15 @@ function startPickTimer(io: Server, leagueId: number, deadline: Date) {
   }
 
   // Set timeout for autopick
-  const timer = setTimeout(() => {
+  const timeout = setTimeout(() => {
     handleTimerExpired(io, leagueId);
   }, msUntilDeadline);
 
-  draftTimers.set(leagueId, timer);
-
   // Also emit periodic timer updates (every 5 seconds)
-  const updateInterval = setInterval(() => {
+  const broadcastInterval = setInterval(() => {
     const remaining = deadline.getTime() - Date.now();
     if (remaining <= 0) {
-      clearInterval(updateInterval);
+      clearInterval(broadcastInterval);
       return;
     }
     io.to(roomName).emit('draft:timer', {
@@ -280,8 +309,7 @@ function startPickTimer(io: Server, leagueId: number, deadline: Date) {
     });
   }, 5000);
 
-  // Store the interval to clear it later
-  setTimeout(() => clearInterval(updateInterval), msUntilDeadline + 1000);
+  draftTimers.set(leagueId, { timeout, broadcastInterval });
 }
 
 /**
@@ -290,7 +318,8 @@ function startPickTimer(io: Server, leagueId: number, deadline: Date) {
 function clearPickTimer(leagueId: number) {
   const existingTimer = draftTimers.get(leagueId);
   if (existingTimer) {
-    clearTimeout(existingTimer);
+    clearTimeout(existingTimer.timeout);
+    clearInterval(existingTimer.broadcastInterval);
     draftTimers.delete(leagueId);
   }
 }

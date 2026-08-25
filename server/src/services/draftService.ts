@@ -115,16 +115,18 @@ export async function startDraft(leagueId: number) {
     throw new Error('Need at least 2 members to start draft');
   }
 
-  // Fisher-Yates shuffle for unbiased draft order
-  const shuffledMembers = [...league.members];
-  for (let i = shuffledMembers.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffledMembers[i], shuffledMembers[j]] = [shuffledMembers[j], shuffledMembers[i]];
-  }
+  // Preassigned order (set when the draft was scheduled, so the lobby can
+  // show it) is respected. Members without a position — nobody set an order,
+  // or they joined after it was set — get shuffled into the remaining spots.
+  const positioned = league.members
+    .filter((m) => m.draftPosition !== null)
+    .sort((a, b) => (a.draftPosition || 0) - (b.draftPosition || 0));
+  const unpositioned = shuffle(league.members.filter((m) => m.draftPosition === null));
+  const orderedMembers = [...positioned, ...unpositioned];
 
-  for (let i = 0; i < shuffledMembers.length; i++) {
+  for (let i = 0; i < orderedMembers.length; i++) {
     await prisma.leagueMember.update({
-      where: { id: shuffledMembers[i].id },
+      where: { id: orderedMembers[i].id },
       data: { draftPosition: i + 1 },
     });
   }
@@ -147,11 +149,70 @@ export async function startDraft(leagueId: number) {
     draftStarted: true,
     currentPickNumber: 1,
     deadline,
-    memberOrder: shuffledMembers.map((m, i) => ({
+    memberOrder: orderedMembers.map((m, i) => ({
       userId: m.userId,
       draftPosition: i + 1,
     })),
   };
+}
+
+/** Fisher-Yates shuffle (returns a new array) */
+function shuffle<T>(items: T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+/**
+ * Assign the draft order ahead of the draft, so the lobby can show it.
+ * `order` = userIds first-to-last for a commissioner-set order; omit it to
+ * randomize. Throws if the draft already started or the order doesn't cover
+ * exactly the current member set.
+ */
+export async function assignDraftOrder(leagueId: number, order?: number[]) {
+  const league = await prisma.league.findUnique({
+    where: { id: leagueId },
+    include: { members: true },
+  });
+
+  if (!league) {
+    throw new Error('League not found');
+  }
+  if (league.draftStarted) {
+    throw new Error('Cannot change draft order after the draft has started');
+  }
+
+  let orderedMembers;
+  if (order && order.length > 0) {
+    const memberByUserId = new Map(league.members.map((m) => [m.userId, m]));
+    if (
+      order.length !== league.members.length ||
+      new Set(order).size !== order.length ||
+      order.some((userId) => !memberByUserId.has(userId))
+    ) {
+      throw new Error('Draft order must include each league member exactly once');
+    }
+    orderedMembers = order.map((userId) => memberByUserId.get(userId)!);
+  } else {
+    orderedMembers = shuffle(league.members);
+  }
+
+  await prisma.$transaction(
+    orderedMembers.map((m, i) =>
+      prisma.leagueMember.update({
+        where: { id: m.id },
+        data: { draftPosition: i + 1 },
+      })
+    )
+  );
+
+  return orderedMembers.map((m, i) => ({
+    userId: m.userId,
+    draftPosition: i + 1,
+  }));
 }
 
 /**
@@ -198,6 +259,8 @@ export async function getDraftState(leagueId: number) {
 
   return {
     leagueId,
+    // Server clock stamp so clients can correct for device-clock skew
+    serverNow: new Date().toISOString(),
     draftStarted: league.draftStarted,
     draftComplete: league.draftComplete,
     draftStatus: league.draftStatus,

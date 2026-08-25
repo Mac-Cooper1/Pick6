@@ -38,6 +38,32 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
   available, like a real draft board. The AP-rank autopick fallback already
   exists server-side — this extends it into a full visible ranking.
 - Show each team's ranking chip in the draft list/board once rankings exist.
+- **Weekly awards + "your teams ranked" pages** (Mac + Johnny, Aug 24 after
+  the first real draft). Two engagement pages that share one data layer
+  (per-team-per-owner points, best single results, underdog wins):
+  - **Weekly Awards**: one page, auto-pulled weekly. Most dominant win, best
+    underdog win, etc.
+  - **Team net points / best-to-worst picks**: how many points each of your
+    teams has netted you, ranked best pick to worst across the league.
+  Design them as one page family, not bolt-ons. Downstream: the same data
+  folds into a waiver page and a "Pick 6 ranking" that seeds next season's
+  draft order. Not launch-critical; build after the season is running.
+
+## **2027 ideas**
+
+- **Go to 6 teams: two Group of 6 slots (recommended).** Johnny spotted it
+  after the first draft: with 5 rounds (odd), snake order still favors early
+  picks. Position 1's pick numbers sum to 12N+3 vs position N's 13N+2; any
+  odd round count does this, even counts self-balance. Fix: 6 rounds via a
+  second G6 slot. G6 is the only pool deep enough to double up (Mountain
+  West alone is what the rebuilt Pac-12 raided, so a mandatory-MW slot would
+  be thin), and it makes the name "Pick 6" literal. This is a schema-level
+  change (roster size, dual-slot uniqueness incl. the partial unique
+  indexes, swap logic, TEAMS_PER_ROSTER) — do it in the 2027 offseason,
+  never mid-season.
+  - Stopgap if a 2026 league that hasn't drafted wants balance now:
+    **third-round reversal** (round 3 repeats round 2's direction) — small,
+    no schema change. Not built; ask Mac before adding.
 
 ## Parking lot
 

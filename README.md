@@ -36,7 +36,8 @@ Smaller spreads and pick'ems score as regular results.
 ## Features
 
 - **Accounts**: email + password (bcrypt), JWT sessions; leagues joined by a 6-character code
-- **Live snake draft**: Socket.IO rooms, countdown clock, scheduled auto-start, slot-aware pick validation, draft queue with AP-rank autopick fallback
+- **Live snake draft**: Socket.IO rooms, server-time countdown clock, scheduled auto-start with a pre-draft lobby (order, presence, queue building), slot-aware pick validation, draft queue with AP-rank autopick fallback
+- **Draft order**: assigned when the draft is scheduled — random or set manually by the commissioner in Settings — and visible in the lobby before the first pick
 - **Draft Recap**: everyone's roster in a players × slots grid plus the pick-by-pick order
 - **Automated scoring**: ESPN scores + The Odds API spreads → upset detection (±3.5 rule) → weekly rescore, on a GitHub Actions schedule
 - **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-5 swap can never rewrite history
@@ -159,6 +160,16 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Aug 24, 2026** — QA round 2 (Mac + Johnny's notes from the first real league draft):
+- **Draft clock fixed** (the "adds 15 seconds at zero" bug — three compounding defects, no 15 anywhere in the code): (1) every pick started a 5s deadline-broadcast interval that `clearPickTimer` never cleared, so stale intervals kept emitting the *previous* deadline and clients' clocks jumped between two values — the interval now dies with its timeout; (2) the client counted down on the device clock, so a phone 15s off hit 0:00 early/late and blipped on every server sync — the countdown now runs on a server-clock offset (`serverNow` is in every `draft:timer` and `draft:state` event); (3) autopick's AP-rankings lookup was a live uncached ESPN call — now cached 10 min with a 3s abort timeout (falls back to random, as before)
+- **Search filter clears after a pick**: selecting a team wrote its name into the search box; once drafted, the filter matched nothing and the board "disappeared". The box now clears when the team it names gets drafted (yours or anyone's)
+- **Pre-draft lobby**: a scheduled draft now renders the full room ahead of time — countdown to start in the scoreboard header, "First pick" callout, a Draft Order card with live presence dots (new `draft:presence` socket event), queue building, and the empty board — so nobody meets the interface for the first time on the clock. The commissioner gets a "Start draft now" button in the lobby. The bare "scheduled for..." card is gone (only unscheduled drafts show a placeholder)
+- **Draft order is set at scheduling, not at start**: scheduling a draft assigns a random order immediately (so the lobby can show it), Settings gains a Draft Order section — Random or Set manually (up/down reorder list) — plus "Shuffle order now" while scheduled; changes push to open lobbies live. `startDraft` respects preassigned positions and only shuffles members who lack one; late joiners append to the end
+- **Settings date bug** (found while testing): the schedule form seeded its date field from UTC (`toISOString`) but its time field from local time, so re-saving an evening draft without touching the fields silently moved it a day later. Both now use local components
+- **DB access for Claude**: git-ignored `.claude/db-access.md` with connection strings and a Postgres-enforced read-only query wrapper (`PGOPTIONS default_transaction_read_only`); CLAUDE.md points to it
+- Parked in NOTES.md: weekly awards + team net-points pages (one data layer), and a new **2027 ideas** section — go to 6 teams with two G6 slots to fix the odd-round snake advantage Johnny spotted
+- Verified: 43-assertion smoke suite green, `tsc` + `vite build` both sides, and a real headless-Chrome draft on a fresh test league (LOBBY1, league 14) — lobby at phone + desktop widths, pick via search (filter clears, board intact), 20 clock samples with zero upward jumps, autopick landing seconds after zero
 
 **Aug 23, 2026** — Visual design pass + landing page (design only; every query, socket call, mutation and `onClick` is untouched, no server changes):
 - **Type system**: self-hosted Barlow (UI) + Barlow Condensed (headlines, tab labels, the draft clock, every big number) via `@fontsource`, tabular numerals everywhere. Shape system documented in `index.css`: cards `rounded-xl` + 1px border + green-tinted shadow (`.card`), buttons/inputs `rounded-lg`, chips pills. New utility classes `.section-title` / `.section-sub` / `.label` replace the per-card green header bars

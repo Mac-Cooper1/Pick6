@@ -40,3 +40,6 @@ prisma/migrations/
 
 # Testing
 coverage/
+
+# Claude local context (DB credentials — never commit)
+.claude/db-access.md

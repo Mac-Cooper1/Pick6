@@ -32,6 +32,7 @@ export interface DraftMember {
 
 export interface DraftState {
   leagueId: number;
+  serverNow?: string;
   draftStarted: boolean;
   draftComplete: boolean;
   draftStatus: 'NOT_STARTED' | 'SCHEDULED' | 'LIVE' | 'PAUSED' | 'COMPLETE';
@@ -77,6 +78,7 @@ export interface DraftSocketHandlers {
   onUserJoined?: (data: { userId: number; timestamp: string }) => void;
   onUserLeft?: (data: { userId: number; timestamp: string }) => void;
   onQueueUpdated?: (data: { teamIds: number[] }) => void;
+  onPresence?: (data: { userIds: number[] }) => void;
   onError?: (error: DraftError) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
@@ -155,6 +157,10 @@ export function connectToDraft(
 
   socket.on('draft:queue:updated', (data: { teamIds: number[] }) => {
     handlers.onQueueUpdated?.(data);
+  });
+
+  socket.on('draft:presence', (data: { userIds: number[] }) => {
+    handlers.onPresence?.(data);
   });
 
   socket.on('draft:error', (error: DraftError) => {
