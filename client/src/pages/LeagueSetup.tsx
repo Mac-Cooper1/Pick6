@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { leagueApi } from '../services/api';
 import { Button } from '../components/Button';
@@ -16,6 +16,7 @@ interface LeagueSetupProps {
 export function LeagueSetup({ mode }: LeagueSetupProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [params] = useSearchParams();
 
   const [flowMode, setFlowMode] = useState<FlowMode>(mode || 'select');
   const [error, setError] = useState('');
@@ -26,8 +27,11 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
   const [maxPlayers, setMaxPlayers] = useState(10);
   const [customJoinCode, setCustomJoinCode] = useState('');
 
-  // Join league state
-  const [joinCode, setJoinCode] = useState('');
+  // Join league state; a shared join link (/league/join?code=ABC123)
+  // presets the code, the member just confirms
+  const [joinCode, setJoinCode] = useState(
+    () => (params.get('code') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+  );
 
   // Update flow mode when prop changes
   useEffect(() => {

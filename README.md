@@ -35,7 +35,7 @@ Smaller spreads and pick'ems score as regular results.
 
 ## Features
 
-- **Accounts**: email + password (bcrypt), JWT sessions; leagues joined by a 6-character code
+- **Accounts**: email + password (bcrypt), JWT sessions; leagues joined by a 6-character code or a shared join link that presets it; members edit their display name in Settings
 - **Live snake draft**: Socket.IO rooms, server-time countdown clock, scheduled auto-start with a pre-draft lobby (order, presence, queue building), slot-aware pick validation, draft queue with AP-rank autopick fallback
 - **Draft order**: assigned when the draft is scheduled — random or set manually by the commissioner in Settings — and visible in the lobby before the first pick
 - **Draft Recap**: everyone's roster in a players × slots grid plus the pick-by-pick order
@@ -113,7 +113,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 
 | Area | Routes |
 |---|---|
-| Auth (public) | `POST /api/auth/register` `POST /api/auth/login` · `GET /api/auth/me` |
+| Auth | public: `POST /api/auth/register` `POST /api/auth/login` · JWT: `GET /api/auth/me` `PATCH /api/auth/me` (name) |
 | Leagues | `GET /my` · `POST /create` · `POST /join` (code only) · `GET /:id` · `GET /:id/members` · `PATCH /:id/settings` |
 | Draft | `GET /:id/picks` · `GET /:id/available` · `GET /:id/state` · `POST /:id/start` (commissioner) · queue CRUD — live picks go over Socket.IO |
 | Rosters | `GET /:id` · `GET /:id/my` · `GET /:id/user/:userId` · `GET /:id/available` · `GET /:id/matchups[/all]` |
@@ -160,6 +160,15 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Aug 25, 2026** — Schedule-draft calendar wouldn't allow today late in the evening (Mac, ~11pm):
+- The date picker's `min` was the **UTC** date (`toISOString()`), which flips to tomorrow at 8pm ET, so the calendar greyed out today; typing the date manually still worked because the save-button and server checks compare real timestamps. `min` now uses local date components (same UTC-vs-local class as the schedule-form seed bug fixed earlier today; a shared `toLocalDateString` helper now covers both, and the unused UTC-based `getMinDateTime` is deleted). Verified in the live repro window: with UTC already on tomorrow's date, the picker's `min` is local today and today validates
+
+**Aug 25, 2026** — Share links + member profile settings:
+- **Share button next to the join code** (Settings tab): opens the native share sheet where the browser has one (phones, macOS Chrome/Safari), otherwise copies the link with a "Link copied" confirmation. The link is `/league/join?code=XXXXXX` — it presets the code on the join page, and everyone still goes through the normal sign-in/sign-up first
+- **Auth remembers where you were headed**: `ProtectedRoute` and the 401 interceptor now send signed-out visitors to `/login?next=<destination>` (internal paths only), the destination survives the sign-in ↔ sign-up toggle, and both flows land there afterward. This is what makes a shared join link work for a friend with no account yet: link → sign up → join page with the code filled in → one tap
+- **Your Profile card in Settings** (every member, not just the commissioner): shows the signed-in email and lets you edit your display name. New `PATCH /api/auth/me` (name only; same normalization as register), synced into the auth context + localStorage, all tabs refreshed
+- Verified end-to-end in headless Chrome: signed-out visitor opened a share link, signed up as a brand-new user, landed on the join page with the code preset, joined the league, then renamed themselves from Settings (header + storage updated). Share fallback confirmed by stubbing out `navigator.share`: clipboard got the exact URL + feedback shown. Smoke 43/43, `tsc` + build green both sides
 
 **Aug 25, 2026** — Signup asks for first + last name (form-level split, no DB change):
 - The signup form now collects **First name** and **Last name** (side by side on desktop, stacked on phones, proper `given-name`/`family-name` autocomplete) and submits them as one string into the existing `User.name` column. Deliberately **not** a schema migration: the DB is live prod, every display surface reads `name`, and backfilling a split from existing values means guessing where nicknames break. If dedicated columns are ever wanted (e.g. "J. Kirven" short forms on tight board columns), that's an offseason migration — by then all post-change signups are guaranteed clean two-part names

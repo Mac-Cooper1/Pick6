@@ -193,4 +193,9 @@ the `/api/odds` routes are deleted, leaving the cron as the only spender
 (~65 credits/month). Also Aug 25: signup collects first + last name but joins
 them into the single `User.name` column (deliberately no migration — DB is
 live prod; server `register` normalizes whitespace, stays one-field lenient
-for scripts). Next up: the Aug 27–29 dress rehearsal on real games.
+for scripts). Also Aug 25: share button next to the join code (native share
+sheet or clipboard; link = `/league/join?code=X`, which presets the code),
+auth preserves the destination through login/signup via a validated
+`?next=` param, and a Your Profile card in Settings lets any member edit
+their name (`PATCH /api/auth/me`). Next up: the Aug 27–29 dress rehearsal
+on real games.

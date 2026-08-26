@@ -46,10 +46,14 @@ api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<ErrorResponse>) => {
     if (error.response?.status === 401) {
-      // Clear token and redirect to login
+      // Clear token and redirect to login, remembering where the user was
+      // so signing back in returns them there (e.g. a shared join link)
       localStorage.removeItem('pick6_token');
       localStorage.removeItem('pick6_user');
-      if (window.location.pathname !== '/login') window.location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = `/login?next=${next}`;
+      }
     }
     return Promise.reject(error);
   }
@@ -69,6 +73,11 @@ export const authApi = {
 
   getCurrentUser: async (): Promise<User> => {
     const { data } = await api.get<User>('/auth/me');
+    return data;
+  },
+
+  updateMe: async (name: string): Promise<User> => {
+    const { data } = await api.patch<User>('/auth/me', { name });
     return data;
   },
 };

@@ -14,6 +14,12 @@ export function Login() {
   const { user, isLoading: authLoading, register, login } = useAuth();
 
   const authMode: AuthMode = params.get('mode') === 'signup' ? 'signup' : 'signin';
+
+  // Post-auth destination (set by ProtectedRoute / the 401 interceptor, e.g.
+  // a shared join link). Internal paths only — never a full URL.
+  const rawNext = params.get('next');
+  const nextPath = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null;
+  const destination = nextPath || '/dashboard';
   // Collected as first + last but stored as one name: the User table keeps a
   // single (live, prod) name column, so the split lives only in this form
   const [firstName, setFirstName] = useState('');
@@ -23,11 +29,15 @@ export function Login() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  if (!authLoading && user) return <Navigate to="/dashboard" replace />;
+  if (!authLoading && user) return <Navigate to={destination} replace />;
 
   const setMode = (mode: AuthMode) => {
     setError('');
-    setParams(mode === 'signup' ? { mode } : {}, { replace: true });
+    // Keep the post-auth destination across sign-in/sign-up toggles
+    const nextParams: Record<string, string> = {};
+    if (mode === 'signup') nextParams.mode = mode;
+    if (nextPath) nextParams.next = nextPath;
+    setParams(nextParams, { replace: true });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -56,11 +66,11 @@ export function Login() {
       if (authMode === 'signup') {
         const fullName = `${firstName.trim()} ${lastName.trim()}`.replace(/\s+/g, ' ');
         await register(fullName, email, password);
-        navigate('/dashboard');
+        navigate(destination);
       } else {
         try {
           await login(email, password);
-          navigate('/dashboard');
+          navigate(destination);
         } catch (err: any) {
           if (err.response?.status === 401) {
             setError('Invalid email or password.');
