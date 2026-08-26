@@ -8,6 +8,9 @@ import { Logo } from '../components/Logo';
 
 type AuthMode = 'signin' | 'signup';
 
+// Manual reset path until we have a domain + email sending (see NOTES.md)
+const FORGOT_EMAIL = 'mac.cooper002@gmail.com';
+
 export function Login() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -28,6 +31,7 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
 
   if (!authLoading && user) return <Navigate to={destination} replace />;
 
@@ -176,15 +180,28 @@ export function Login() {
                 required
               />
 
-              <Input
-                label="Password"
-                type="password"
-                placeholder={authMode === 'signup' ? 'At least 8 characters' : 'Your password'}
-                autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <div>
+                <Input
+                  label="Password"
+                  type="password"
+                  placeholder={authMode === 'signup' ? 'At least 8 characters' : 'Your password'}
+                  autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                {authMode === 'signin' && (
+                  <div className="mt-1.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgot(true)}
+                      className="text-sm font-semibold text-green-800 underline underline-offset-2"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <Button type="submit" size="lg" fullWidth disabled={isLoading} className="mt-2">
                 {isLoading ? 'One moment...' : authMode === 'signup' ? 'Create account' : 'Sign in'}
@@ -193,6 +210,46 @@ export function Login() {
           </div>
         </div>
       </div>
+
+      {showForgot && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setShowForgot(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="forgot-title"
+            className="card w-full max-w-sm p-5 sm:p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="forgot-title" className="section-title text-xl mb-2">
+              Forgot your password?
+            </h2>
+            <p className="text-gray-600 leading-relaxed mb-5">
+              No self-serve reset yet. For now, just reach out to the dev with the
+              new password you'd like to reset it to.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                fullWidth
+                onClick={() => {
+                  window.location.href = `mailto:${FORGOT_EMAIL}?subject=${encodeURIComponent(
+                    'Pick 6 password reset'
+                  )}&body=${encodeURIComponent(
+                    'Hey Mac, I forgot my Pick 6 password.\n\nMy account email: \nReset my password to: '
+                  )}`;
+                }}
+              >
+                Email the dev
+              </Button>
+              <Button variant="secondary" fullWidth onClick={() => setShowForgot(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
