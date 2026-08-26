@@ -7,6 +7,23 @@ import prisma from '../lib/prisma';
 
 const BCRYPT_ROUNDS = 10;
 const MIN_PASSWORD_LENGTH = 8;
+const MAX_NAME_LENGTH = 60;
+
+/**
+ * Trim + collapse whitespace. The signup form collects first + last but the
+ * API contract stays a single name (scripts and tests create one-word users,
+ * so no two-word requirement here). Throws on empty or too-long names.
+ */
+function normalizeName(raw: unknown): string {
+  const name = String(raw ?? '').trim().replace(/\s+/g, ' ');
+  if (!name) {
+    throw new AppError('Name is required', 400);
+  }
+  if (name.length > MAX_NAME_LENGTH) {
+    throw new AppError(`Name must be ${MAX_NAME_LENGTH} characters or fewer`, 400);
+  }
+  return name;
+}
 
 /**
  * Register a new user
@@ -21,16 +38,7 @@ export async function register(req: Request, res: Response, next: any) {
       throw new AppError('Name, email, and password are required', 400);
     }
 
-    // Normalize whitespace; the signup form collects first + last but the
-    // API contract stays a single name (scripts and tests create one-word
-    // users, so no two-word requirement here)
-    const normalizedName = String(name).trim().replace(/\s+/g, ' ');
-    if (!normalizedName) {
-      throw new AppError('Name is required', 400);
-    }
-    if (normalizedName.length > 60) {
-      throw new AppError('Name must be 60 characters or fewer', 400);
-    }
+    const normalizedName = normalizeName(name);
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
@@ -109,6 +117,31 @@ export async function login(req: Request, res: Response, next: any) {
         email: user.email,
       },
       token,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Update current user's profile (name only for now)
+ * PATCH /api/auth/me
+ * Protected route. Body: { name: string }
+ */
+export async function updateCurrentUser(req: AuthRequest, res: Response, next: any) {
+  try {
+    const userId = req.userId!;
+    const normalizedName = normalizeName(req.body?.name);
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { name: normalizedName },
+    });
+
+    res.json({
+      id: user.id,
+      name: user.name,
+      email: user.email,
     });
   } catch (error) {
     next(error);

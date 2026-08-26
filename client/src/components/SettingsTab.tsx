@@ -1,18 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CaretUp, CaretDown } from '@phosphor-icons/react';
-import { leagueApi, adminApi, swapApi } from '../services/api';
+import { CaretUp, CaretDown, ShareNetwork } from '@phosphor-icons/react';
+import { leagueApi, adminApi, swapApi, authApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { Button } from './Button';
+import { Input } from './Input';
 
 interface SettingsTabProps {
   leagueId: number;
 }
 
+// Local-timezone YYYY-MM-DD. Never toISOString() for date inputs: the UTC
+// date is already "tomorrow" during the local evening, which greys out today
+// in the calendar picker.
+function toLocalDateString(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export function SettingsTab({ leagueId }: SettingsTabProps) {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const queryClient = useQueryClient();
 
   // Get league info including commissioner status
@@ -34,6 +43,11 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   const [success, setSuccess] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [swapMessage, setSwapMessage] = useState<string | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
+  // Your Profile (every member, not just the commissioner)
+  const [profileName, setProfileName] = useState(user?.name || '');
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
 
   // Swap window state + commissioner open/close
   const { data: swapState } = useQuery({
@@ -74,15 +88,20 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     },
   });
 
+  // Keep the profile field in sync with the signed-in user
+  useEffect(() => {
+    if (user?.name) setProfileName(user.name);
+  }, [user?.name]);
+
   // Initialize form with current values
   useEffect(() => {
     if (currentLeague) {
       if (currentLeague.draftScheduledAt) {
-        // Local date components, NOT toISOString(): the UTC date can be a day
+        // Local components, NOT toISOString(): the UTC date can be a day
         // ahead of the local evening, which silently moved re-saved drafts
         const date = new Date(currentLeague.draftScheduledAt);
         const pad = (n: number) => n.toString().padStart(2, '0');
-        setDraftDate(`${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`);
+        setDraftDate(toLocalDateString(date));
         setDraftTime(`${pad(date.getHours())}:${pad(date.getMinutes())}`);
       }
       // Seed the manual-order list: assigned order if one exists, join order otherwise
@@ -107,6 +126,52 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
       return next;
     });
   };
+
+  // Share a join link: native share sheet on phones, clipboard elsewhere.
+  // The link presets the code on /league/join; new folks still sign up first.
+  const handleShareJoinLink = async () => {
+    if (!currentLeague) return;
+    const url = `${window.location.origin}/league/join?code=${currentLeague.joinCode}`;
+    const copyLink = async () => {
+      await navigator.clipboard.writeText(url);
+      setShareFeedback('Link copied');
+      setTimeout(() => setShareFeedback(null), 2500);
+    };
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Pick 6',
+          text: `Join my Pick 6 league "${currentLeague.name}" with code ${currentLeague.joinCode}`,
+          url,
+        });
+        return;
+      }
+      await copyLink();
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return; // user closed the share sheet
+      try {
+        await copyLink();
+      } catch {
+        setShareFeedback(url); // clipboard blocked: show the link itself
+      }
+    }
+  };
+
+  // Save profile name mutation (any member)
+  const updateProfileMutation = useMutation({
+    mutationFn: (name: string) => authApi.updateMe(name),
+    onSuccess: (updated) => {
+      updateUser(updated);
+      setProfileName(updated.name);
+      setProfileMessage('Name updated.');
+      // Names show on every tab (leaderboard, board, rosters): refresh all
+      queryClient.invalidateQueries();
+      setTimeout(() => setProfileMessage(null), 3000);
+    },
+    onError: (err: any) => {
+      setProfileMessage(err.response?.data?.message || 'Failed to update name');
+    },
+  });
 
   // Update settings mutation
   const updateSettingsMutation = useMutation({
@@ -178,12 +243,6 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     });
   };
 
-  const getMinDateTime = () => {
-    const now = new Date();
-    now.setMinutes(now.getMinutes() + 5); // At least 5 minutes in future
-    return now.toISOString().slice(0, 16);
-  };
-
   if (!currentLeague) return <Loading inline />;
 
   return (
@@ -198,7 +257,17 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <span className="label">Join code</span>
-            <p className="font-mono font-bold text-lg tracking-widest text-gray-900">{currentLeague.joinCode}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-mono font-bold text-lg tracking-widest text-gray-900">{currentLeague.joinCode}</p>
+              <button
+                onClick={handleShareJoinLink}
+                className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-green-800 hover:text-green-900 hover:bg-green-50 active:bg-green-100"
+                title="Share a join link"
+                aria-label="Share a join link"
+              >
+                <ShareNetwork size={18} weight="bold" />
+              </button>
+            </div>
           </div>
           <div>
             <span className="label">Season</span>
@@ -212,6 +281,44 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
             <span className="label">Week</span>
             <p className="font-display font-bold text-lg text-gray-900">{currentLeague.currentWeek}</p>
           </div>
+        </div>
+        {shareFeedback && (
+          <p className="mt-3 text-sm text-green-800 break-all">{shareFeedback}</p>
+        )}
+      </div>
+
+      {/* Your Profile (every member) */}
+      <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
+        <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900 mb-1">Your Profile</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          Signed in as <span className="font-semibold">{user?.email}</span>. Your name shows on the leaderboard and draft board.
+        </p>
+        {profileMessage && (
+          <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+            {profileMessage}
+          </div>
+        )}
+        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+          <div className="flex-1 max-w-sm">
+            <Input
+              label="Name"
+              type="text"
+              autoComplete="name"
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              required
+            />
+          </div>
+          <Button
+            onClick={() => updateProfileMutation.mutate(profileName)}
+            disabled={
+              updateProfileMutation.isPending ||
+              !profileName.trim() ||
+              profileName.trim().replace(/\s+/g, ' ') === user?.name
+            }
+          >
+            {updateProfileMutation.isPending ? 'Saving...' : 'Save name'}
+          </Button>
         </div>
       </div>
 
@@ -349,7 +456,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
                       type="date"
                       value={draftDate}
                       onChange={(e) => setDraftDate(e.target.value)}
-                      min={new Date().toISOString().split('T')[0]}
+                      min={toLocalDateString(new Date())}
                       className="w-full px-3.5 py-3 text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-green-600"
                     />
                   </div>

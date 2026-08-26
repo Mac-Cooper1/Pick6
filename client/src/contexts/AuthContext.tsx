@@ -9,6 +9,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
+  updateUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -59,6 +60,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     localStorage.removeItem('pick6_user');
   };
 
+  // Sync a profile change (e.g. name edit) into context + localStorage
+  const updateUser = (updated: User) => {
+    setUser(updated);
+    localStorage.setItem('pick6_user', JSON.stringify(updated));
+  };
+
   const value: AuthContextType = {
     user,
     token,
@@ -66,6 +73,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     login,
     register,
     logout,
+    updateUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
