@@ -200,6 +200,7 @@ export async function syncOdds(
       homeScore: null,
       awayScore: null,
       venue: game.venue,
+      broadcast: null,
       isCompleted: false,
       winnerId: null,
     };

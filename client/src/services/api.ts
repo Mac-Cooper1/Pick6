@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios';
 import type {
   AuthResponse,
   User,
+  ConferenceSlot,
   League,
   CreateLeagueData,
   JoinLeagueData,
@@ -333,6 +334,8 @@ export interface TeamMatchup {
   teamId: number;
   teamName: string;
   abbreviation: string | null;
+  slot: ConferenceSlot;
+  fromWeek: number;
   game: {
     espnEventId: string;
     opponent: string;
@@ -343,6 +346,7 @@ export interface TeamMatchup {
     homeScore: number | null;
     awayScore: number | null;
     venue: string | null;
+    broadcast: string | null;
   } | null;
   odds: {
     spread: number | null;
@@ -356,6 +360,12 @@ export interface TeamMatchup {
 }
 
 export const matchupApi = {
+  getMyMatchups: async (leagueId: number, week?: number): Promise<TeamMatchup[]> => {
+    const params = week ? `?week=${week}` : '';
+    const { data } = await api.get(`/rosters/${leagueId}/matchups${params}`);
+    return data;
+  },
+
   getAllMatchups: async (leagueId: number, week?: number): Promise<Array<{ userId: number; userName: string; matchups: TeamMatchup[] }>> => {
     const params = week ? `?week=${week}` : '';
     const { data } = await api.get(`/rosters/${leagueId}/matchups/all${params}`);

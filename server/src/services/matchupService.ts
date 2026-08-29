@@ -38,6 +38,8 @@ export interface TeamMatchup {
   teamId: number;
   teamName: string;
   abbreviation: string | null;
+  slot: string;
+  fromWeek: number;
   game: {
     espnEventId: string;
     opponent: string;
@@ -48,6 +50,7 @@ export interface TeamMatchup {
     homeScore: number | null;
     awayScore: number | null;
     venue: string | null;
+    broadcast: string | null;
   } | null;
   odds: MatchupOdds | null;
 }
@@ -358,6 +361,8 @@ export async function getRosterMatchups(
       teamId: team.id,
       teamName: team.name,
       abbreviation: team.abbreviation,
+      slot: rt.slot,
+      fromWeek: rt.fromWeek,
       game: null,
       odds: null,
     };
@@ -376,6 +381,7 @@ export async function getRosterMatchups(
         homeScore: game.homeScore,
         awayScore: game.awayScore,
         venue: game.venue,
+        broadcast: game.broadcast,
       };
 
       // Look up stored odds by ESPN event id
