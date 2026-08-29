@@ -203,5 +203,8 @@ auth preserves the destination through login/signup via a validated
 their name (`PATCH /api/auth/me`). **Aug 29**: My Team tab added (slot cards
 with opponent/kickoff/venue/TV network/spread; ESPN scoreboard parser now
 captures `broadcasts`; matchups carry `slot`/`fromWeek`/`broadcast`) and the
-Draft Recap tab retired, its swap UI moved into My Team. Week 1 games are
-underway (dress rehearsal weekend).
+Draft Recap tab retired, its swap UI moved into My Team. Also Aug 29:
+league membership locks at draft start — `joinLeague` rejects new members
+once `draftStarted` (a mid-draft join would corrupt the snake math), and
+Settings greys the player capacity + hides the share button when locked.
+Week 1 games are underway (dress rehearsal weekend).

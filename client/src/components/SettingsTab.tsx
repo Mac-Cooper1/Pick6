@@ -33,6 +33,12 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   const currentLeague = leagues?.find(l => l.id === leagueId);
   const isCommissioner = currentLeague?.isCommissioner ?? false;
 
+  // Membership locks the moment the draft starts (LIVE, PAUSED, or COMPLETE)
+  const membershipLocked =
+    currentLeague?.draftStatus === 'LIVE' ||
+    currentLeague?.draftStatus === 'PAUSED' ||
+    currentLeague?.draftStatus === 'COMPLETE';
+
   // Draft settings state
   const [draftDate, setDraftDate] = useState('');
   const [draftTime, setDraftTime] = useState('');
@@ -259,14 +265,17 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
             <span className="label">Join code</span>
             <div className="flex items-center gap-2">
               <p className="font-mono font-bold text-lg tracking-widest text-gray-900">{currentLeague.joinCode}</p>
-              <button
-                onClick={handleShareJoinLink}
-                className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-green-800 hover:text-green-900 hover:bg-green-50 active:bg-green-100"
-                title="Share a join link"
-                aria-label="Share a join link"
-              >
-                <ShareNetwork size={18} weight="bold" />
-              </button>
+              {/* Joining locks at draft start, so the share link only exists before then */}
+              {!membershipLocked && (
+                <button
+                  onClick={handleShareJoinLink}
+                  className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-green-800 hover:text-green-900 hover:bg-green-50 active:bg-green-100"
+                  title="Share a join link"
+                  aria-label="Share a join link"
+                >
+                  <ShareNetwork size={18} weight="bold" />
+                </button>
+              )}
             </div>
           </div>
           <div>
@@ -275,7 +284,17 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
           </div>
           <div>
             <span className="label">Players</span>
-            <p className="font-display font-bold text-lg text-gray-900">{currentLeague.memberCount}/{currentLeague.maxPlayers}</p>
+            {membershipLocked ? (
+              <div title="Membership locked when the draft started. Nobody new can join.">
+                <p className="font-display font-bold text-lg text-gray-900">
+                  {currentLeague.memberCount}
+                  <span className="text-gray-300">/{currentLeague.maxPlayers}</span>
+                </p>
+                <span className="label text-[11px] text-gray-400">locked at draft</span>
+              </div>
+            ) : (
+              <p className="font-display font-bold text-lg text-gray-900">{currentLeague.memberCount}/{currentLeague.maxPlayers}</p>
+            )}
           </div>
           <div>
             <span className="label">Week</span>
