@@ -5,19 +5,19 @@ import { leagueApi } from '../services/api';
 import { AppHeader } from '../components/AppHeader';
 import { LeagueTab } from '../components/LeagueTab';
 import { DraftTab } from '../components/DraftTab';
-import { DraftRecapTab } from '../components/DraftRecapTab';
+import { MyTeamTab } from '../components/MyTeamTab';
 import { LeaderboardTab } from '../components/LeaderboardTab';
 import { WeekByWeekTab } from '../components/WeekByWeekTab';
 import { SettingsTab } from '../components/SettingsTab';
 
-type Tab = 'leaderboard' | 'weeks' | 'league' | 'draft' | 'recap' | 'settings';
+type Tab = 'leaderboard' | 'myteam' | 'weeks' | 'league' | 'draft' | 'settings';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'leaderboard', label: 'Leaderboard' },
+  { id: 'myteam', label: 'My Team' },
   { id: 'weeks', label: 'Week by Week' },
   { id: 'league', label: 'League' },
   { id: 'draft', label: 'Draft' },
-  { id: 'recap', label: 'Draft Recap' },
   { id: 'settings', label: 'Settings' },
 ];
 
@@ -63,10 +63,10 @@ export function MainApp() {
       {/* Tab Content */}
       <main className="max-w-6xl mx-auto">
         {activeTab === 'leaderboard' && <LeaderboardTab leagueId={leagueIdNum} />}
+        {activeTab === 'myteam' && <MyTeamTab leagueId={leagueIdNum} />}
         {activeTab === 'weeks' && <WeekByWeekTab leagueId={leagueIdNum} />}
         {activeTab === 'league' && <LeagueTab leagueId={leagueIdNum} />}
         {activeTab === 'draft' && <DraftTab leagueId={leagueIdNum} />}
-        {activeTab === 'recap' && <DraftRecapTab leagueId={leagueIdNum} />}
         {activeTab === 'settings' && <SettingsTab leagueId={leagueIdNum} />}
       </main>
     </div>

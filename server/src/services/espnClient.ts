@@ -55,6 +55,10 @@ export interface ESPNGame {
         state: string;
       };
     };
+    broadcasts?: Array<{
+      market?: string;
+      names?: string[];
+    }>;
     competitors: ESPNCompetitor[];
     status: {
       type: {
@@ -104,6 +108,7 @@ export interface ParsedGame {
   homeScore: number | null;
   awayScore: number | null;
   venue: string | null;
+  broadcast: string | null;
   isCompleted: boolean;
   winnerId: string | null;
 }
@@ -247,6 +252,9 @@ export function parseScoreboardGames(
       homeScore: homeCompetitor.score ? parseInt(homeCompetitor.score, 10) : null,
       awayScore: awayCompetitor.score ? parseInt(awayCompetitor.score, 10) : null,
       venue: competition.venue?.fullName || null,
+      // First listed network ("ESPN", "NBC", "CBSSN", ...); streaming-only
+      // games come through the same field (e.g. "ESPN+")
+      broadcast: competition.broadcasts?.[0]?.names?.[0] || null,
       isCompleted: event.status.type.completed,
       winnerId,
     };

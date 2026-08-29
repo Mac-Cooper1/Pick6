@@ -37,10 +37,13 @@ turn — standing instruction from Mac)**.
 - **Client**: React 18 + Vite + Tailwind + TanStack Query. Routes: `/` =
   marketing landing (signed-out; signed-in users bounce to `/dashboard`),
   `/login` (`?mode=signup`), `/dashboard`, `/league/create|join`,
-  `/league/:id` (tabs). Tabs: Leaderboard (default) · Week by Week (grid +
-  per-week drill-down) · League (rosters + spreads) · Draft (live room) ·
-  Draft Recap (rosters by slot + swap UI) · Settings (commissioner: schedule
-  draft, Sync Now, swap window, 90s default clock).
+  `/league/:id` (tabs). Tabs: Leaderboard (default) · My Team (your five +
+  weekly games with kickoff/venue/network/spread, and the week-5 swap UI) ·
+  Week by Week (grid + per-week drill-down) · League (rosters + spreads) ·
+  Draft (live room) · Settings (commissioner: schedule draft, Sync Now, swap
+  window, 90s default clock; every member: profile name edit). Draft Recap
+  was retired Aug 29 (rosters = League tab, picks = Draft tab's final board,
+  swap UI moved to My Team).
   **Design system (Aug 23)**: Barlow (UI) + Barlow Condensed (`font-display`:
   headlines, tab labels, clock, big numbers), self-hosted via `@fontsource`
   imports in `main.tsx`; icons from `@phosphor-icons/react` only, no emoji.
@@ -197,5 +200,8 @@ for scripts). Also Aug 25: share button next to the join code (native share
 sheet or clipboard; link = `/league/join?code=X`, which presets the code),
 auth preserves the destination through login/signup via a validated
 `?next=` param, and a Your Profile card in Settings lets any member edit
-their name (`PATCH /api/auth/me`). Next up: the Aug 27–29 dress rehearsal
-on real games.
+their name (`PATCH /api/auth/me`). **Aug 29**: My Team tab added (slot cards
+with opponent/kickoff/venue/TV network/spread; ESPN scoreboard parser now
+captures `broadcasts`; matchups carry `slot`/`fromWeek`/`broadcast`) and the
+Draft Recap tab retired, its swap UI moved into My Team. Week 1 games are
+underway (dress rehearsal weekend).

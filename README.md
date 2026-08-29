@@ -38,7 +38,7 @@ Smaller spreads and pick'ems score as regular results.
 - **Accounts**: email + password (bcrypt), JWT sessions; leagues joined by a 6-character code or a shared join link that presets it; members edit their display name in Settings
 - **Live snake draft**: Socket.IO rooms, server-time countdown clock, scheduled auto-start with a pre-draft lobby (order, presence, queue building), slot-aware pick validation, draft queue with AP-rank autopick fallback
 - **Draft order**: assigned when the draft is scheduled — random or set manually by the commissioner in Settings — and visible in the lobby before the first pick
-- **Draft Recap**: everyone's roster in a players × slots grid plus the pick-by-pick order
+- **My Team**: your five teams with this week's game each — opponent, kickoff, venue, TV network (from ESPN), and the stored spread with what it means for scoring; also home of the week-5 swap flow
 - **Automated scoring**: ESPN scores + The Odds API spreads → upset detection (±3.5 rule) → weekly rescore, on a GitHub Actions schedule
 - **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-5 swap can never rewrite history
 - **Matchup board**: each rostered team's upcoming opponent, kickoff, and spread (read from the DB — the exact line scoring will use) with AP rank badges
@@ -160,6 +160,11 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Aug 29, 2026** — My Team tab; Draft Recap retired:
+- **New My Team tab** (second position, between Leaderboard and Week by Week): one card per conference slot with your team (AP rank badge, "wk 6+" swap-in note), the week's game — vs./at opponent with rank, kickoff day + time, venue, **TV network** — and the stored team-relative spread with its scoring meaning ("upset pays +2" / "loss costs 1"); live and final games show the score instead. Data is the existing matchup pipeline (`GET /rosters/:id/matchups`, DB spreads + cached ESPN scoreboard — zero Odds API spend); the scoreboard parser now also captures `broadcasts` (ESPN/NBC/CBSSN/ESPN+ etc., confirmed live for every 2026 week-1 game) and matchups carry `slot`/`fromWeek`/`broadcast`
+- **Draft Recap tab removed**: everyone's rosters live on the League tab and the pick-by-pick board on the Draft tab, so the only unique content was the **week-5 swap flow — moved wholesale into My Team** (window status, turn-order strip, drop/add selects, pass). Copy that pointed at Draft Recap (Settings swap message, draft-complete banner) now points at My Team
+- Verified against the smoke league with real data: five cards rendered with real kickoffs, venues, networks (SEC Network, NBC, ESPN, ESPN+), spreads incl. a "no line yet" FCS matchup, rank badge, swap annotations, and the closed swap window card; phone (375×812) + desktop screenshots, smoke 43/43, `tsc` + build green both sides
 
 **Aug 25, 2026** — Schedule-draft calendar wouldn't allow today late in the evening (Mac, ~11pm):
 - The date picker's `min` was the **UTC** date (`toISOString()`), which flips to tomorrow at 8pm ET, so the calendar greyed out today; typing the date manually still worked because the save-button and server checks compare real timestamps. `min` now uses local date components (same UTC-vs-local class as the schedule-form seed bug fixed earlier today; a shared `toLocalDateString` helper now covers both, and the unused UTC-based `getMinDateTime` is deleted). Verified in the live repro window: with UTC already on tomorrow's date, the picker's `min` is local today and today validates

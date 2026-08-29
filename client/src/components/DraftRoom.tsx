@@ -461,7 +461,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
       <div className="p-4 sm:p-6">
         <div className="mb-4 sm:mb-6">
           <h2 className="section-title">Draft Complete</h2>
-          <p className="section-sub">Every team is drafted. See Draft Recap for rosters by slot.</p>
+          <p className="section-sub">Every team is drafted. See My Team for your matchups, or the League tab for every roster.</p>
         </div>
 
         {/* Final Draft Board */}

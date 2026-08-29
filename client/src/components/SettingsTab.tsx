@@ -61,7 +61,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
     onSuccess: (state) => {
       setSwapMessage(
         state.status === 'OPEN'
-          ? 'Swap window is open. Turn order is posted in Draft Recap.'
+          ? 'Swap window is open. Turn order is posted in My Team.'
           : 'Swap window closed.'
       );
       queryClient.invalidateQueries({ queryKey: ['swapState', leagueId] });
