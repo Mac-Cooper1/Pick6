@@ -125,12 +125,8 @@ export async function joinLeague(req: AuthRequest, res: Response, next: any) {
       throw new AppError('League not found', 404);
     }
 
-    // Check if league is full
-    if (league.members.length >= league.maxPlayers) {
-      throw new AppError('League is full', 400);
-    }
-
-    // Check if user is already a member
+    // Existing members always get through (this check runs first so a member
+    // of a full or locked league can still "join" back to the league page)
     const existingMember = league.members.find((m) => m.userId === userId);
     if (existingMember) {
       // Return league info if already a member
@@ -142,6 +138,22 @@ export async function joinLeague(req: AuthRequest, res: Response, next: any) {
         draftComplete: league.draftComplete,
         message: 'Already a member of this league',
       });
+    }
+
+    // The membership locks the moment the draft starts: rosters, snake-order
+    // math, standings, and the week-5 swap order all assume a fixed member
+    // set from that point on. draftStarted stays true through LIVE, PAUSED,
+    // and COMPLETE.
+    if (league.draftStarted) {
+      throw new AppError(
+        'This league\'s draft has already happened, so new players can\'t join. Ask the commissioner about next season!',
+        400
+      );
+    }
+
+    // Check if league is full
+    if (league.members.length >= league.maxPlayers) {
+      throw new AppError('League is full', 400);
     }
 
     // Add user as member. If a draft order was already assigned (lobby shows
