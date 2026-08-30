@@ -49,13 +49,21 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
   });
   const currentLeague = leagues?.find((l) => l.id === leagueId);
 
+  // Whose team is on screen: yours by default, any league-mate's via the
+  // dropdown. Swap controls only ever render on your own view.
+  const [viewUserId, setViewUserId] = useState<number | null>(null);
+  const viewingUserId = viewUserId ?? user?.id;
+  const viewingSelf = viewingUserId === user?.id;
+  const viewedMember = currentLeague?.members?.find((m) => m.id === viewingUserId);
+
   const {
     data: matchups,
     isLoading: matchupsLoading,
     error: matchupsError,
   } = useQuery({
-    queryKey: ['myMatchups', leagueId],
-    queryFn: () => matchupApi.getMyMatchups(leagueId),
+    queryKey: ['myMatchups', leagueId, viewingUserId],
+    queryFn: () => matchupApi.getMyMatchups(leagueId, undefined, viewingSelf ? undefined : viewingUserId),
+    enabled: !!viewingUserId,
     refetchInterval: 60000,
   });
 
@@ -162,15 +170,42 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-      <div>
-        <h2 className="section-title">My Team</h2>
-        <p className="section-sub">
-          Your five, week {currentLeague?.currentWeek ?? ''}. Spreads are the lines scoring uses.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h2 className="section-title">
+            {viewingSelf ? 'My Team' : `${viewedMember?.name ?? 'Their'}'s Team`}
+          </h2>
+          <p className="section-sub">
+            {viewingSelf ? 'Your' : 'Their'} five, week {currentLeague?.currentWeek ?? ''}. Spreads are the lines scoring uses.
+          </p>
+        </div>
+        {(currentLeague?.members?.length ?? 0) > 1 && (
+          <div className="self-start sm:self-auto">
+            <label htmlFor="teamViewer" className="label block mb-1">Viewing</label>
+            {/* 16px on phones or iOS Safari zooms the page on focus */}
+            <select
+              id="teamViewer"
+              value={viewingUserId ?? ''}
+              onChange={(e) => {
+                const id = parseInt(e.target.value);
+                setViewUserId(id === user?.id ? null : id);
+              }}
+              className="px-3 py-2 text-base sm:text-sm bg-white border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-green-600"
+            >
+              {user && <option value={user.id}>My team</option>}
+              {currentLeague?.members
+                ?.filter((m) => m.id !== user?.id)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+            </select>
+          </div>
+        )}
       </div>
 
-      {/* Week-5 swap window (visible once opened) */}
-      {swapState && swapState.status !== 'NOT_OPEN' && (
+      {/* Week-5 swap window (your own view only; the swap is your move) */}
+      {viewingSelf && swapState && swapState.status !== 'NOT_OPEN' && (
         <div className={`card overflow-hidden ${swapState.status === 'OPEN' ? 'border-amber-300' : ''}`}>
           <div className={`p-4 ${swapState.status === 'OPEN' ? 'bg-amber-50 border-b border-amber-200' : 'bg-gray-50 border-b border-gray-200'}`}>
             <div className="flex items-baseline gap-2">
@@ -303,7 +338,9 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
             No teams yet
           </p>
           <p className="text-sm">
-            Your five teams and their weekly games will live here once you draft.
+            {viewingSelf
+              ? 'Your five teams and their weekly games will live here once you draft.'
+              : 'Their teams will show up here once the draft begins.'}
           </p>
         </div>
       ) : (
@@ -325,7 +362,17 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
               <div key={slot} className="card p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <span className="label text-[11px]">{SLOT_LABELS[slot]}</span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="label text-[11px]">{SLOT_LABELS[slot]}</span>
+                      <span
+                        className={`text-[11px] font-semibold tabular-nums ${
+                          m.seasonPoints > 0 ? 'text-green-700' : m.seasonPoints < 0 ? 'text-red-600' : 'text-gray-400'
+                        }`}
+                        title="Net points this team has earned for this roster on the season"
+                      >
+                        {m.seasonPoints > 0 ? `+${m.seasonPoints}` : m.seasonPoints} {Math.abs(m.seasonPoints) === 1 ? 'pt' : 'pts'} season
+                      </span>
+                    </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       {teamRank && (
                         <span className="bg-amber-400 text-amber-950 font-display font-bold text-xs px-1.5 py-0.5 rounded">

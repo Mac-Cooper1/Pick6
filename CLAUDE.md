@@ -207,4 +207,8 @@ Draft Recap tab retired, its swap UI moved into My Team. Also Aug 29:
 league membership locks at draft start — `joinLeague` rejects new members
 once `draftStarted` (a mid-draft join would corrupt the snake math), and
 Settings greys the player capacity + hides the share button when locked.
+**Aug 30**: My Team gained a Viewing dropdown — any member's team via
+`GET /rosters/:id/matchups?userId=` (swap card stays self-only) — and each
+card shows the team's season net points (computed from FINAL `Game` rows,
+effective-week windows respected; nothing new stored).
 Week 1 games are underway (dress rehearsal weekend).

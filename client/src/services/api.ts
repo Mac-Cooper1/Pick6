@@ -336,6 +336,7 @@ export interface TeamMatchup {
   abbreviation: string | null;
   slot: ConferenceSlot;
   fromWeek: number;
+  seasonPoints: number;
   game: {
     espnEventId: string;
     opponent: string;
@@ -360,9 +361,12 @@ export interface TeamMatchup {
 }
 
 export const matchupApi = {
-  getMyMatchups: async (leagueId: number, week?: number): Promise<TeamMatchup[]> => {
-    const params = week ? `?week=${week}` : '';
-    const { data } = await api.get(`/rosters/${leagueId}/matchups${params}`);
+  getMyMatchups: async (leagueId: number, week?: number, userId?: number): Promise<TeamMatchup[]> => {
+    const params = new URLSearchParams();
+    if (week) params.set('week', String(week));
+    if (userId) params.set('userId', String(userId));
+    const qs = params.toString();
+    const { data } = await api.get(`/rosters/${leagueId}/matchups${qs ? `?${qs}` : ''}`);
     return data;
   },
 

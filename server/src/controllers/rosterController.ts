@@ -92,7 +92,25 @@ export async function getMyMatchups(req: AuthRequest, res: Response) {
 
   await requireMembership(leagueId, req.userId!);
 
-  const matchups = await getRosterMatchups(leagueId, req.userId!, weekNumber);
+  // Optional ?userId= views a league-mate's team (My Team tab's viewer
+  // dropdown). Any member may view any member; the target must be one.
+  let targetUserId = req.userId!;
+  if (req.query.userId) {
+    targetUserId = parseInt(req.query.userId as string);
+    if (isNaN(targetUserId)) {
+      throw new AppError('Invalid user ID', 400);
+    }
+    if (targetUserId !== req.userId) {
+      const targetMember = await prisma.leagueMember.findUnique({
+        where: { leagueId_userId: { leagueId, userId: targetUserId } },
+      });
+      if (!targetMember) {
+        throw new AppError('That user is not a member of this league', 404);
+      }
+    }
+  }
+
+  const matchups = await getRosterMatchups(leagueId, targetUserId, weekNumber);
   res.json(matchups);
 }
 
