@@ -161,6 +161,15 @@ pick6/
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
 
+**Aug 30, 2026** — Season net points on My Team cards:
+- Each My Team card now shows the team's **net season points for that roster** next to its slot label ("+2 pts season", green/red/grey), computed on the fly from FINAL `Game` rows with the exact scoring formula (win 1, upset win 2, loss 0, upset loss −1) — same source the Week by Week drill-down uses, nothing new stored. `TeamMatchup` carries `seasonPoints`
+- **Effective-week windows are respected**: a swapped-in team counts only from its `fromWeek`, so its earlier wins don't inflate the current owner's card (a dropped team's contribution lives in Week by Week, not on the current five). This means a card can show a green final and "0 pts season" — correct, not a bug
+- Verified against an independent SQL recomputation (all five teams matched exactly, including a fromWeek-6 swap-in and an upset-loss −1); smoke 43/43, `tsc` + build green
+
+**Aug 30, 2026** — My Team viewer dropdown:
+- The My Team tab gained a **Viewing** dropdown (defaults to "My team") that loads any league-mate's team with the same cards: slot, rank, opponent, kickoff, venue, network, spread with its scoring meaning, live/final scores. `GET /rosters/:id/matchups` now takes an optional `?userId=` (any member may view any member; non-member targets get a clean 404). The week-5 swap card renders only on your own view since the swap is your move; the title flips to "Name's Team"
+- Verified: API returns a league-mate's five with the viewer param and rejects outsiders; headless phone run defaults to self (swap card present), switches to another member (title, cards, swap card hidden). Smoke 43/43, `tsc` + build green
+
 **Aug 29, 2026** — Manual roster add (prod data fix, no code change):
 - Charlie Hodgkins joined league 8 (The Fighting Bagels) after its draft completed; per Mac's approval his roster was added by hand: five `RosterSlot` rows (`fromWeek` 1) — Auburn (SEC), Michigan State (Big Ten), Virginia (ACC+ND), Oklahoma State (Big 12), Boise State (G6). All five were unowned in the league; verified against live prod data before and after. He scores from week 1 on the next sync; he won't appear on the Draft tab's pick board (no `DraftPick` rows), which is expected for a manual add
 

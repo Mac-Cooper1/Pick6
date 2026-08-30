@@ -40,6 +40,7 @@ export interface TeamMatchup {
   abbreviation: string | null;
   slot: string;
   fromWeek: number;
+  seasonPoints: number;
   game: {
     espnEventId: string;
     opponent: string;
@@ -262,6 +263,62 @@ async function getStoredOddsByEventId(
 }
 
 /**
+ * Net points each rostered team has earned across the season, per the
+ * scoring rules, from FINAL Game rows. Counts only weeks inside each
+ * slot's effective window (fromWeek/toWeek) so swaps never double-count.
+ */
+async function getSeasonPointsByTeam(
+  seasonYear: number,
+  rosterSlots: Array<{ teamId: number; fromWeek: number; toWeek: number | null }>
+): Promise<Map<number, number>> {
+  const teamIds = rosterSlots.map((rs) => rs.teamId);
+  if (teamIds.length === 0) return new Map();
+
+  const finishedGames = await prisma.game.findMany({
+    where: {
+      seasonYear,
+      status: 'FINAL',
+      winnerTeamId: { not: null },
+      OR: [{ homeTeamId: { in: teamIds } }, { awayTeamId: { in: teamIds } }],
+    },
+    select: {
+      homeTeamId: true,
+      awayTeamId: true,
+      winnerTeamId: true,
+      wasUpset: true,
+      weekNumber: true,
+    },
+  });
+
+  // One game per team per week (duplicate rows are rare but possible after
+  // postponements; first FINAL wins, matching the standings drill-down)
+  const gameByTeamWeek = new Map<string, (typeof finishedGames)[number]>();
+  for (const game of finishedGames) {
+    for (const tid of [game.homeTeamId, game.awayTeamId]) {
+      const key = `${tid}:${game.weekNumber}`;
+      if (!gameByTeamWeek.has(key)) gameByTeamWeek.set(key, game);
+    }
+  }
+
+  const points = new Map<number, number>();
+  for (const rs of rosterSlots) {
+    let total = 0;
+    for (const [key, game] of gameByTeamWeek) {
+      const [tidStr, weekStr] = key.split(':');
+      if (parseInt(tidStr) !== rs.teamId) continue;
+      const gameWeek = parseInt(weekStr);
+      if (gameWeek < rs.fromWeek) continue;
+      if (rs.toWeek !== null && gameWeek > rs.toWeek) continue;
+      const won = game.winnerTeamId === rs.teamId;
+      total += won ? (game.wasUpset ? 2 : 1) : game.wasUpset ? -1 : 0;
+    }
+    points.set(rs.teamId, total);
+  }
+
+  return points;
+}
+
+/**
  * Get matchups with odds for all teams on a user's roster
  */
 export async function getRosterMatchups(
@@ -352,6 +409,12 @@ export async function getRosterMatchups(
   // Stored odds for the week's games (DB only — never the live Odds API)
   const oddsByEventId = await getStoredOddsByEventId(seasonYear, week);
 
+  // Season net points per rostered team, from finished Game rows with the
+  // same formula scoring uses (win 1, upset win 2, loss 0, upset loss -1).
+  // Each slot only counts weeks inside its effective window, so a swapped-in
+  // team starts from its fromWeek.
+  const seasonPointsByTeam = await getSeasonPointsByTeam(seasonYear, rosterSlots);
+
   // Build matchup data for each rostered team
   const matchups: TeamMatchup[] = rosterSlots.map((rt) => {
     const team = rt.team;
@@ -363,6 +426,7 @@ export async function getRosterMatchups(
       abbreviation: team.abbreviation,
       slot: rt.slot,
       fromWeek: rt.fromWeek,
+      seasonPoints: seasonPointsByTeam.get(team.id) ?? 0,
       game: null,
       odds: null,
     };
