@@ -4,6 +4,28 @@ import { AppError } from '../middleware/errorHandler';
 import prisma from '../lib/prisma';
 import { getCurrentWeek } from '../services/seasonService';
 import { SLOT_LABELS } from '../services/draftService';
+import {
+  gamesForTeamWeek,
+  loadScoringWeekMap,
+  pointsForTeam,
+} from '../services/scoringWeekService';
+
+interface WeekDetailTeam {
+  slot: string;
+  slotLabel: string;
+  teamId: number;
+  teamName: string;
+  opponent: string | null;
+  result: 'W' | 'L' | 'pending' | 'none';
+  scoreLine: string | null;
+  points: number;
+  wasUpset: boolean;
+  teamSpread: number | null;
+  gameStatus: string | null;
+  // ESPN week the game was played in; null on a bye, and it differs from
+  // the requested week when a double-game rolled forward
+  playedWeek: number | null;
+}
 
 async function requireMembership(leagueId: number, userId: number) {
   if (isNaN(leagueId)) {
@@ -103,26 +125,12 @@ export async function getWeekDetail(req: AuthRequest, res: Response) {
     }),
   ]);
 
-  const teamIds = rosterSlots.map((rs) => rs.teamId);
-  const games = await prisma.game.findMany({
-    where: {
-      seasonYear: league.seasonYear,
-      weekNumber,
-      OR: [{ homeTeamId: { in: teamIds } }, { awayTeamId: { in: teamIds } }],
-    },
-    include: { homeTeam: true, awayTeam: true },
-  });
-
-  const gameByTeam = new Map<number, (typeof games)[number]>();
-  for (const game of games) {
-    // FINAL games win over duplicates (e.g. postponed placeholder rows)
-    for (const tid of [game.homeTeamId, game.awayTeamId]) {
-      const existing = gameByTeam.get(tid);
-      if (!existing || (existing.status !== 'FINAL' && game.status === 'FINAL')) {
-        gameByTeam.set(tid, game);
-      }
-    }
-  }
+  // Every game attributed to this scoring week (a double-game week shows
+  // both; a rolled-forward game shows under the week it counts for)
+  const scoringWeeks = await loadScoringWeekMap(
+    league.seasonYear,
+    rosterSlots.map((rs) => rs.teamId)
+  );
 
   const detail = members.map((m) => {
     const slots = rosterSlots
@@ -130,46 +138,63 @@ export async function getWeekDetail(req: AuthRequest, res: Response) {
       .sort((a, b) => a.slot.localeCompare(b.slot));
 
     let weekTotal = 0;
-    const teams = slots.map((rs) => {
-      const game = gameByTeam.get(rs.teamId);
-      let result: 'W' | 'L' | 'pending' | 'none' = 'none';
-      let points = 0;
-      let opponent: string | null = null;
-      let scoreLine: string | null = null;
-      let teamSpread: number | null = null;
-
-      if (game) {
-        const isHome = game.homeTeamId === rs.teamId;
-        opponent = (isHome ? game.awayTeam : game.homeTeam).name;
-        teamSpread = game.spread !== null ? (isHome ? game.spread : -game.spread) : null;
-
-        if (game.status === 'FINAL' && game.winnerTeamId) {
-          const won = game.winnerTeamId === rs.teamId;
-          result = won ? 'W' : 'L';
-          points = won ? (game.wasUpset ? 2 : 1) : game.wasUpset ? -1 : 0;
-          const my = isHome ? game.homeScore : game.awayScore;
-          const their = isHome ? game.awayScore : game.homeScore;
-          scoreLine = `${my}–${their}`;
-        } else {
-          result = 'pending';
-        }
-      }
-
-      weekTotal += points;
-
-      return {
+    const teams = slots.flatMap((rs): WeekDetailTeam[] => {
+      const base = {
         slot: rs.slot,
         slotLabel: SLOT_LABELS[rs.slot],
         teamId: rs.teamId,
         teamName: rs.team.name,
-        opponent,
-        result,
-        scoreLine,
-        points,
-        wasUpset: game?.wasUpset ?? false,
-        teamSpread,
-        gameStatus: game?.status ?? null,
       };
+      const games = gamesForTeamWeek(scoringWeeks, rs.teamId, weekNumber);
+
+      if (games.length === 0) {
+        return [
+          {
+            ...base,
+            opponent: null,
+            result: 'none' as const,
+            scoreLine: null,
+            points: 0,
+            wasUpset: false,
+            teamSpread: null,
+            gameStatus: null,
+            playedWeek: null,
+          },
+        ];
+      }
+
+      return games.map((game): WeekDetailTeam => {
+        const isHome = game.homeTeamId === rs.teamId;
+        const opponent = (isHome ? game.awayTeam : game.homeTeam).name;
+        const teamSpread =
+          game.spread !== null ? (isHome ? game.spread : -game.spread) : null;
+
+        let result: 'W' | 'L' | 'pending' = 'pending';
+        let points = 0;
+        let scoreLine: string | null = null;
+
+        if (game.status === 'FINAL' && game.winnerTeamId) {
+          result = game.winnerTeamId === rs.teamId ? 'W' : 'L';
+          points = pointsForTeam(game, rs.teamId);
+          const my = isHome ? game.homeScore : game.awayScore;
+          const their = isHome ? game.awayScore : game.homeScore;
+          scoreLine = `${my}–${their}`;
+        }
+
+        weekTotal += points;
+
+        return {
+          ...base,
+          opponent,
+          result,
+          scoreLine,
+          points,
+          wasUpset: game.wasUpset,
+          teamSpread,
+          gameStatus: game.status,
+          playedWeek: game.weekNumber,
+        };
+      });
     });
 
     return { userId: m.userId, userName: m.user.name, weekTotal, teams };

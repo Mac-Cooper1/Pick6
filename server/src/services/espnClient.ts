@@ -187,6 +187,31 @@ export async function fetchGameSummary(eventId: string): Promise<any> {
 }
 
 /**
+ * The closing line ESPN shows on a game page (`pickcenter`, DraftKings first).
+ * Returns the HOME team's spread (negative = home favored), the same sign
+ * convention as Game.spread. Free, keyed by event id (no name matching), and
+ * it persists after the game ends, which is what makes it usable as a
+ * reference when a stored Odds API line is suspect (admin repair-spreads).
+ */
+export interface EspnGameLine {
+  spread: number; // home team spread
+  details: string; // e.g. "UNLV -2.5"
+  provider: string; // e.g. "DraftKings"
+}
+
+export async function fetchGameLine(eventId: string): Promise<EspnGameLine | null> {
+  const summary = await fetchGameSummary(eventId);
+  const entries: any[] = Array.isArray(summary?.pickcenter) ? summary.pickcenter : [];
+  const entry = entries.find((p) => typeof p?.spread === 'number');
+  if (!entry) return null;
+  return {
+    spread: entry.spread,
+    details: entry.details || '',
+    provider: entry.provider?.name || 'ESPN',
+  };
+}
+
+/**
  * Parse ESPN scoreboard response into normalized game data
  */
 export function parseScoreboardGames(

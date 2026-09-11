@@ -19,6 +19,10 @@ import {
   DRAFT_SLOTS,
 } from '../src/services/draftService';
 import { finalizeGames, calculateLeagueScores } from '../src/services/syncService';
+import { assignScoringWeeks } from '../src/services/scoringWeekService';
+import { matchGameToOdds, teamNamesAgree } from '../src/services/teamMatcher';
+import { ParsedGame } from '../src/services/espnClient';
+import { ParsedOdds } from '../src/services/oddsClient';
 import { getUserRoster, getAllRosters } from '../src/services/rosterService';
 import {
   openSwapWindow,
@@ -27,6 +31,14 @@ import {
   passSwap,
   getSwapState,
 } from '../src/services/swapService';
+
+// The smoke league lives in its own season so its synthetic games can never
+// collide with real Game rows synced into the local DB (a real still-
+// scheduled week-1 row for the same team would make a synthetic final the
+// team's "second game" and roll it forward). The 2026 calendar is copied
+// under this year so week derivation works without touching ESPN.
+const SMOKE_SEASON = 2099;
+const CALENDAR_SOURCE_SEASON = 2026;
 
 let passed = 0;
 let failed = 0;
@@ -71,6 +83,25 @@ async function main() {
   await prisma.user.deleteMany({
     where: { email: { in: ['smoke1@test.local', 'smoke2@test.local', 'smoke3@test.local'] } },
   });
+  await prisma.seasonWeek.deleteMany({ where: { seasonYear: SMOKE_SEASON } });
+
+  // Private calendar for the smoke season (same dates as the real one)
+  const calendar = await prisma.seasonWeek.findMany({
+    where: { seasonYear: CALENDAR_SOURCE_SEASON },
+    orderBy: { weekNumber: 'asc' },
+  });
+  if (calendar.length === 0) {
+    throw new Error(`No ${CALENDAR_SOURCE_SEASON} SeasonWeek rows — run the seed / a sync first`);
+  }
+  await prisma.seasonWeek.createMany({
+    data: calendar.map((w) => ({
+      seasonYear: SMOKE_SEASON,
+      weekNumber: w.weekNumber,
+      label: w.label,
+      startDate: w.startDate,
+      endDate: w.endDate,
+    })),
+  });
 
   // ---------- Setup: 2 users + league ----------
   console.log('— Setup');
@@ -86,7 +117,7 @@ async function main() {
       name: 'Smoke League',
       joinCode: 'SMOKE1',
       maxPlayers: 8,
-      seasonYear: 2026,
+      seasonYear: SMOKE_SEASON,
       commissionerUserId: alice.id,
     },
   });
@@ -239,7 +270,7 @@ async function main() {
     prisma.game.create({
       data: {
         espnEventId: `smoke-g${i}`,
-        seasonYear: 2026,
+        seasonYear: SMOKE_SEASON,
         weekNumber: 1,
         homeTeamId: aliceRoster[i - 1].teamId,
         awayTeamId: bobRoster[i - 1].teamId,
@@ -274,7 +305,7 @@ async function main() {
     status: GameStatus.POSTPONED,
   });
 
-  await finalizeGames(2026, 1);
+  await finalizeGames(SMOKE_SEASON, 1);
 
   const flags = await prisma.game.findMany({
     where: { espnEventId: { in: ['smoke-g1', 'smoke-g2', 'smoke-g3', 'smoke-g4'] } },
@@ -332,7 +363,7 @@ async function main() {
   await prisma.game.create({
     data: {
       espnEventId: 'smoke-g6',
-      seasonYear: 2026,
+      seasonYear: SMOKE_SEASON,
       weekNumber: 6,
       homeTeamId: newG6Team!.id,
       awayTeamId: bobRoster[4].teamId,
@@ -345,7 +376,7 @@ async function main() {
       winnerTeamId: newG6Team!.id,
     },
   });
-  await finalizeGames(2026, 6);
+  await finalizeGames(SMOKE_SEASON, 6);
   const week6 = await calculateLeagueScores(league.id, 6);
   const aliceW6 = week6.scores.find((s) => s.userId === alice.id)?.points;
   assert(aliceW6 === 1, `week 6 scores the swapped-in team (+1) — got ${aliceW6}`);
@@ -436,6 +467,144 @@ async function main() {
     'swap after close rejected',
     'not open'
   );
+
+  // ---------- Double-game weeks (ESPN's two-weekend Week 1) ----------
+  console.log('— Double-game attribution');
+  const mk = (id: number, weekNumber: number, startTime: string, status = GameStatus.FINAL) => ({
+    id,
+    weekNumber,
+    startTime: new Date(startTime),
+    status,
+  });
+  // FSU shape: two games in week 1, off in week 2 → second game counts as week 2
+  const fsuLike = assignScoringWeeks(
+    [mk(1, 1, '2026-08-29T23:00:00Z'), mk(2, 1, '2026-09-07T23:30:00Z'), mk(3, 3, '2026-09-19T19:30:00Z')],
+    15
+  );
+  assert(
+    fsuLike.get(1) === 1 && fsuLike.get(2) === 2 && fsuLike.get(3) === 3,
+    'two games in week 1 + bye in week 2 → second game counts as week 2'
+  );
+  // UNLV shape: two games in week 1 AND a week-2 game → both stay in week 1
+  const unlvLike = assignScoringWeeks(
+    [mk(1, 1, '2026-08-30T02:00:00Z'), mk(2, 1, '2026-09-06T02:00:00Z'), mk(3, 2, '2026-09-12T19:45:00Z')],
+    15
+  );
+  assert(
+    unlvLike.get(1) === 1 && unlvLike.get(2) === 1 && unlvLike.get(3) === 2,
+    'two games in week 1 + a week-2 game → both count in week 1'
+  );
+  const cancelled = assignScoringWeeks(
+    [mk(1, 1, '2026-08-29T23:00:00Z'), mk(2, 1, '2026-09-05T23:00:00Z'), mk(3, 2, '2026-09-12T19:45:00Z', GameStatus.CANCELLED)],
+    15
+  );
+  assert(cancelled.get(2) === 2 && !cancelled.has(3), 'a cancelled week-2 game is a bye, not a game');
+  const lastWeek = assignScoringWeeks([mk(1, 15, '2026-12-05T17:00:00Z'), mk(2, 15, '2026-12-12T20:00:00Z')], 15);
+  assert(lastWeek.get(2) === 15, 'nothing rolls past the final week');
+
+  // End to end: Alice's SEC team (g1, already +1 in week 1) plays a second
+  // week-1 game and wins. No week-2 game yet → it lands in week 2.
+  const aliceSec = aliceRoster.find((r) => r.slot === 'SEC')!;
+  const filler = await prisma.team.findFirst({
+    where: {
+      id: { notIn: [...aliceRoster, ...bobRoster].map((r) => r.teamId) },
+      slot: ConferenceSlot.NONE,
+    },
+  });
+  await prisma.game.create({
+    data: {
+      espnEventId: 'smoke-g7',
+      seasonYear: SMOKE_SEASON,
+      weekNumber: 1,
+      homeTeamId: aliceSec.teamId,
+      awayTeamId: filler!.id,
+      startTime: new Date('2026-09-07T23:30:00Z'),
+      status: GameStatus.FINAL,
+      homeScore: 27,
+      awayScore: 24,
+      winnerTeamId: aliceSec.teamId,
+    },
+  });
+  const w1Rolled = await calculateLeagueScores(league.id, 1);
+  const w2Rolled = await calculateLeagueScores(league.id, 2);
+  assert(
+    w1Rolled.scores.find((x) => x.userId === alice.id)?.points === 3,
+    'Alice week 1 still 3: the Labor Day game rolled forward'
+  );
+  assert(
+    w2Rolled.scores.find((x) => x.userId === alice.id)?.points === 1,
+    'Alice week 2 = 1: the rolled game counts there'
+  );
+  // Now the team also has a week-2 game → both week-1 games count in week 1
+  await prisma.game.create({
+    data: {
+      espnEventId: 'smoke-g8',
+      seasonYear: SMOKE_SEASON,
+      weekNumber: 2,
+      homeTeamId: aliceSec.teamId,
+      awayTeamId: filler!.id,
+      startTime: new Date('2026-09-12T20:00:00Z'),
+      status: GameStatus.SCHEDULED,
+    },
+  });
+  const w1Both = await calculateLeagueScores(league.id, 1);
+  const w2Both = await calculateLeagueScores(league.id, 2);
+  assert(
+    w1Both.scores.find((x) => x.userId === alice.id)?.points === 4,
+    'Alice week 1 = 4 once a week-2 game exists (both games count in week 1)'
+  );
+  assert(
+    w2Both.scores.find((x) => x.userId === alice.id)?.points === 0,
+    'Alice week 2 back to 0 (her week-2 game is not final)'
+  );
+
+  // ---------- Odds matcher (the Hawai'i vs UNLV cross-match) ----------
+  console.log('— Odds matcher');
+  const espnGame = (home: string, away: string, startTime: string): ParsedGame => ({
+    espnEventId: 'x',
+    seasonYear: SMOKE_SEASON,
+    weekNumber: 1,
+    homeTeam: { espnId: '1', name: home, abbreviation: '', displayName: home },
+    awayTeam: { espnId: '2', name: away, abbreviation: '', displayName: away },
+    startTime: new Date(startTime),
+    status: 'scheduled',
+    homeScore: null,
+    awayScore: null,
+    venue: null,
+    broadcast: null,
+    isCompleted: false,
+    winnerId: null,
+  });
+  const oddsEvent = (homeTeam: string, awayTeam: string, spread: number, commence: string): ParsedOdds => ({
+    oddsEventId: 'o',
+    homeTeam,
+    awayTeam,
+    commenceTime: new Date(commence),
+    spread,
+    favoriteTeam: spread < 0 ? 'home' : spread > 0 ? 'away' : null,
+    bookmaker: 'DraftKings',
+    timestamp: new Date(),
+  });
+  const kick = '2026-09-06T02:00:00Z';
+  const sameSlot = [
+    oddsEvent('San Diego State Aztecs', 'Portland State Vikings', -38.5, kick),
+    oddsEvent('Hawaii Rainbow Warriors', 'UNLV Rebels', 2.5, kick),
+  ];
+  const hawaii = matchGameToOdds(espnGame("Hawai'i Rainbow Warriors", 'UNLV Rebels', kick), sameSlot);
+  assert(hawaii?.spread === 2.5, `same-kickoff un-aliased teams no longer cross-match (got ${hawaii?.spread})`);
+  assert(
+    matchGameToOdds(espnGame('Tarleton State Texans', 'Utah Tech Trailblazers', kick), sameSlot) === null,
+    'no name agreement → no line (never someone else\'s line)'
+  );
+  const swapped = matchGameToOdds(
+    espnGame('Georgia Bulldogs', 'Clemson Tigers', kick),
+    [oddsEvent('Clemson Tigers', 'Georgia Bulldogs', 7, kick)]
+  );
+  assert(swapped?.spread === -7 && swapped.favoriteTeam === 'home', 'book lists home/away reversed → spread flipped to ESPN home');
+  assert(teamNamesAgree('San José State Spartans', 'San Jose State Spartans'), 'diacritics fold (San José ↔ San Jose)');
+  assert(teamNamesAgree('Southern Miss Golden Eagles', 'Southern Mississippi Golden Eagles'), 'same first word + mascot agree');
+  assert(!teamNamesAgree('Texas Longhorns', 'Texas State Bobcats'), 'Texas ≠ Texas State');
+  assert(!teamNamesAgree('Miami Hurricanes', 'Miami (OH) RedHawks'), 'Miami ≠ Miami (OH)');
 
   // ---------- Summary ----------
   console.log(`\n${failed === 0 ? '🎉' : '💥'} ${passed} passed, ${failed} failed`);

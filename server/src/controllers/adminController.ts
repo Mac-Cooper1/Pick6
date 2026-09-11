@@ -9,8 +9,9 @@ import {
   syncWeekGames,
   syncOdds,
   finalizeGames,
-  calculateLeagueScores,
   syncAllLeagues,
+  syncCurrentWindow,
+  rescoreWeekForAllLeagues,
 } from '../services/syncService';
 import {
   syncSeasonCalendar,
@@ -18,14 +19,15 @@ import {
   getCurrentWeek,
 } from '../services/seasonService';
 import { wasUpset } from '../services/teamMatcher';
-import { getGamesForWeek } from '../services/espnClient';
+import { getGamesForWeek, fetchGameLine } from '../services/espnClient';
 import { getNCAAFSpreads, isOddsApiConfigured } from '../services/oddsClient';
 
 /**
  * One-call scheduled sync — the single endpoint GitHub Actions hits.
  * Resolves the current week from the ESPN-derived calendar, then runs the
- * full idempotent pipeline (games → odds → finalize → rescore) for every
- * completed league.
+ * idempotent pipeline over a three-week window: previous week (late
+ * finals), current week (games → odds → finalize → rescore), next week
+ * (schedule only). See syncCurrentWindow.
  * POST /api/admin/sync-current?seasonYear=2026
  */
 export async function syncCurrentEndpoint(req: AuthRequest, res: Response) {
@@ -37,13 +39,13 @@ export async function syncCurrentEndpoint(req: AuthRequest, res: Response) {
 
   console.log(`[Admin] sync-current: season ${seasonYear}, week ${weekNumber}`);
 
-  const { leagueResults } = await syncAllLeagues(seasonYear, weekNumber);
+  const result = await syncCurrentWindow(seasonYear, weekNumber);
 
   res.json({
     success: true,
     seasonYear,
     weekNumber,
-    leaguesScored: Object.keys(leagueResults).length,
+    ...result,
   });
 }
 
@@ -253,17 +255,13 @@ export async function gameOverrideEndpoint(req: AuthRequest, res: Response) {
     },
   });
 
-  // Rescore this week for every league that has drafted
-  const leagues = await prisma.league.findMany({
-    where: { draftComplete: true, seasonYear: game.seasonYear },
-  });
-
-  for (const league of leagues) {
-    await calculateLeagueScores(league.id, game.weekNumber);
-  }
+  // Rescore this week AND the next for every league that has drafted: a
+  // team's second game in an ESPN week may be attributed to the week after
+  const leagues = await rescoreWeekForAllLeagues(game.seasonYear, game.weekNumber);
+  await rescoreWeekForAllLeagues(game.seasonYear, game.weekNumber + 1);
 
   console.log(
-    `[Admin] Game ${espnEventId} overridden (${homeScore}-${awayScore}, ${newStatus}); rescored week ${game.weekNumber} for ${leagues.length} leagues`
+    `[Admin] Game ${espnEventId} overridden (${homeScore}-${awayScore}, ${newStatus}); rescored weeks ${game.weekNumber}-${game.weekNumber + 1} for ${leagues.length} leagues`
   );
 
   res.json({
@@ -277,6 +275,127 @@ export async function gameOverrideEndpoint(req: AuthRequest, res: Response) {
       wasUpset: updated.wasUpset,
     },
     leaguesRescored: leagues.length,
+  });
+}
+
+/**
+ * Stored spreads vs ESPN's closing line, with optional repair.
+ *
+ * Why: the odds matcher used to cross-match any two un-aliased teams that
+ * kicked off within an hour of each other, so a game could inherit another
+ * game's line (week 1: Hawai'i vs UNLV stored -29.5, real line UNLV -2.5).
+ * ESPN's game page keeps the DraftKings closing line after the game ends,
+ * keyed by event id, so it is a clean reference.
+ *
+ * A stored line counts as cross-matched when it names a different favorite
+ * than ESPN or sits SPREAD_REPAIR_DIVERGENCE or more points away (normal
+ * line movement is a point or two; wrong-game lines were off by 7 to 32).
+ * Games with no stored line are reported but never filled in: "no line"
+ * scoring stays as it was.
+ *
+ * POST /api/admin/repair-spreads/:seasonYear/:weekNumber        dry run
+ * POST /api/admin/repair-spreads/:seasonYear/:weekNumber?apply=true
+ *   writes the ESPN line, re-runs upset detection, rescores the week and
+ *   the next for every league.
+ */
+const SPREAD_REPAIR_DIVERGENCE = 5;
+
+export async function repairSpreadsEndpoint(req: AuthRequest, res: Response) {
+  const seasonYear = parseInt(req.params.seasonYear);
+  const weekNumber = parseInt(req.params.weekNumber);
+  const apply = req.query.apply === 'true';
+
+  if (isNaN(seasonYear) || isNaN(weekNumber)) {
+    throw new AppError('Invalid season year or week number', 400);
+  }
+
+  const games = await prisma.game.findMany({
+    where: { seasonYear, weekNumber },
+    include: { homeTeam: true, awayTeam: true },
+    orderBy: { startTime: 'asc' },
+  });
+
+  const repaired: Array<Record<string, unknown>> = [];
+  const noStoredLine: string[] = [];
+  const noEspnLine: string[] = [];
+  const errors: string[] = [];
+  let unchanged = 0;
+
+  for (const game of games) {
+    const label = `${game.awayTeam.name} at ${game.homeTeam.name}`;
+    if (game.spread === null) {
+      noStoredLine.push(label);
+      continue;
+    }
+
+    let espn;
+    try {
+      espn = await fetchGameLine(game.espnEventId);
+    } catch (error: any) {
+      errors.push(`${label}: ${error.message}`);
+      continue;
+    }
+    if (!espn) {
+      noEspnLine.push(label);
+      continue;
+    }
+
+    const favoriteDiffers = Math.sign(game.spread) !== Math.sign(espn.spread);
+    const farApart = Math.abs(game.spread - espn.spread) >= SPREAD_REPAIR_DIVERGENCE;
+    if (!favoriteDiffers && !farApart) {
+      unchanged++;
+      continue;
+    }
+
+    const favoriteTeamId =
+      espn.spread < 0 ? game.homeTeamId : espn.spread > 0 ? game.awayTeamId : null;
+
+    if (apply) {
+      await prisma.game.update({
+        where: { id: game.id },
+        data: {
+          spread: espn.spread,
+          favoriteTeamId,
+          bookmaker: `${espn.provider} (ESPN closing line)`,
+          oddsTimestamp: new Date(),
+        },
+      });
+    }
+
+    repaired.push({
+      espnEventId: game.espnEventId,
+      game: label,
+      kickoff: game.startTime,
+      storedSpread: game.spread,
+      espnSpread: espn.spread,
+      espnLine: espn.details,
+      provider: espn.provider,
+    });
+  }
+
+  let leaguesRescored = 0;
+  if (apply && repaired.length > 0) {
+    await finalizeGames(seasonYear, weekNumber);
+    leaguesRescored = (await rescoreWeekForAllLeagues(seasonYear, weekNumber)).length;
+    await rescoreWeekForAllLeagues(seasonYear, weekNumber + 1);
+  }
+
+  console.log(
+    `[Admin] repair-spreads ${seasonYear} week ${weekNumber} (${apply ? 'APPLIED' : 'dry run'}): ${repaired.length} cross-matched, ${unchanged} fine, ${noEspnLine.length} without an ESPN line`
+  );
+
+  res.json({
+    success: true,
+    seasonYear,
+    weekNumber,
+    applied: apply,
+    checked: games.length,
+    unchanged,
+    repaired,
+    noStoredLine,
+    noEspnLine,
+    leaguesRescored,
+    errors,
   });
 }
 

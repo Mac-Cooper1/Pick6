@@ -27,7 +27,7 @@ No two players in a league may roster the same team. Drafting happens in a **liv
 
 Smaller spreads and pick'ems score as regular results.
 
-**The season.** ESPN's official calendar, regular season only (2026: weeks 1–15, from the Aug 22 window through Army-Navy on Dec 12). Bowls and the CFP don't count. There is no "Week 0" — ESPN folds the late-August openers into Week 1.
+**The season.** ESPN's official calendar, regular season only (2026: weeks 1–15, from the Aug 22 window through Army-Navy on Dec 12). Bowls and the CFP don't count. There is no "Week 0" — ESPN folds the late-August openers into Week 1, so some teams play twice in it. **Every game counts**: a team's second game in an ESPN week counts as the next week's game if the team is off that week (FSU's Sep 7 game = week 2); if the team also plays the next week, both games count in the same week.
 
 **Week-5 swap.** After week 5, every player gets one same-slot team swap (worst record picks first). Past weeks keep their points — scoring is roster-as-of-that-week. *(Automation lands in WS8.)*
 
@@ -98,7 +98,7 @@ Leaves an inspectable "Smoke League" — sign in as `smoke1@test.local` / `smoke
 
 ## Scheduled Scoring
 
-`.github/workflows/sync.yml` hits `POST /api/admin/sync-current` (resolves the current week from the ESPN calendar, then games → odds → finalize → rescore, idempotent):
+`.github/workflows/sync.yml` hits `POST /api/admin/sync-current` (resolves the current week from the ESPN calendar, then runs the idempotent pipeline over a three-week window: **previous week** games → finalize → rescore, so a game that ends after ESPN's week boundary still lands; **current week** games → odds → finalize → rescore; **next week** schedule only, so the double-game attribution can tell a bye from a not-yet-synced week. One Odds API credit per run):
 
 - **Daily 11:00 UTC** (~7am ET) — games + odds land before any kickoff (spreads only attach pre-kickoff)
 - **Daily 08:30 UTC** — overnight scores for Tue–Sat night finals
@@ -118,7 +118,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 | Draft | `GET /:id/picks` · `GET /:id/available` · `GET /:id/state` · `POST /:id/start` (commissioner) · queue CRUD — live picks go over Socket.IO |
 | Rosters | `GET /:id` · `GET /:id/my` · `GET /:id/user/:userId` · `GET /:id/available` · `GET /:id/matchups[/all]` |
 | Standings | `GET /:id/week/:n` · `GET /:id/overall` |
-| Admin | `POST /sync-current` · `POST /sync-calendar/:year` · `POST /sync-week/:id/:n` · `POST /sync-games\|sync-odds\|finalize-games\|sync-all-leagues` · `POST /game-override` · `POST /reset-password` · read-only previews |
+| Admin | `POST /sync-current` · `POST /sync-calendar/:year` · `POST /sync-week/:id/:n` · `POST /sync-games\|sync-odds\|finalize-games\|sync-all-leagues` · `POST /game-override` · `POST /repair-spreads/:year/:n[?apply=true]` (stored lines vs ESPN's closing line; dry run unless applied) · `POST /reset-password` · read-only previews |
 | CFB | scoreboard, schedule, AP rankings (cached 60s–1h) |
 
 ## Project Structure
@@ -160,6 +160,13 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Sep 11, 2026** — Three real-data bugs from weeks 1–2 (Mac's voice note), plus the tooling to fix prod:
+- **Double-game weeks**: ESPN's Week 1 spans two weekends, so 12 teams (FSU, UNLV, USC, Stanford, Memphis, Hawai'i, NDSU, NMSU, …) played twice in it and scoring's `findFirst` silently dropped the second game for everyone. New `scoringWeekService` attributes every game to a scoring week under Mac's rule: the extra game rolls into the next week when the team is off then (FSU: Aug 29 = week 1, Sep 7 vs SMU = week 2), otherwise both count in the same week (UNLV). Scoring, the Week by Week drill-down (a team can now show two cards, with a "played wk N" tag on rolled games) and My Team (season points; a rolled game shows on the bye week with a note) all read the same map. `game-override` rescores the game's week and the next
+- **Late finals never landed**: FSU–SMU ended ~2am ET Tuesday, after ESPN's week 1 closed, and `sync-current` only ever touched the current week, so SMU sat on TBD with its win uncounted. `sync-current` now syncs previous + current + next week (see Scheduled Scoring). Game rows also follow ESPN's kickoff/week/venue on update (rescheduled games used to stay in their original week)
+- **Odds cross-matching**: the matcher compared alias-table lookups with `===`, so two un-aliased teams gave `null === null` and any game could inherit another same-kickoff game's line. Hawai'i vs UNLV stored -29.5 (real line UNLV -2.5) and scored as a +2 upset; 7 more week-1 games and several week-2 games carried wrong lines. `teamNamesAgree` now needs a positive signal (exact name, exact alias, or same first word + mascot), folds diacritics (San José), and a book listing home/away reversed gets its spread flipped. New `POST /api/admin/repair-spreads/:year/:week` compares stored lines with ESPN's DraftKings closing line (game summary `pickcenter`, keyed by event id) and, with `?apply=true`, rewrites lines that name a different favorite or sit 5+ points away, then re-runs upset detection and rescoring
+- Smoke test: 58 assertions (was 43), now in its own season year 2099 with a copied calendar so synced local Game rows can't collide with its synthetic games
+- Docs: RULES.md gets the every-game-counts paragraph; NOTES.md parks "take lines from ESPN's scoreboard instead of the Odds API"
 
 **Aug 30, 2026** — Season net points on My Team cards:
 - Each My Team card now shows the team's **net season points for that roster** next to its slot label ("+2 pts season", green/red/grey), computed on the fly from FINAL `Game` rows with the exact scoring formula (win 1, upset win 2, loss 0, upset loss −1) — same source the Week by Week drill-down uses, nothing new stored. `TeamMatchup` carries `seasonPoints`
