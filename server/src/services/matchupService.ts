@@ -13,6 +13,13 @@ import prisma from '../lib/prisma';
 import cacheService, { CACHE_TTL } from './cacheService';
 import { fetchScoreboard, parseScoreboardGames, ParsedGame } from './espnClient';
 import { getCurrentWeek } from './seasonService';
+import {
+  gamesForTeamWeek,
+  loadScoringWeekMap,
+  pointsForTeam,
+  ScoredGame,
+  ScoringWeekMap,
+} from './scoringWeekService';
 
 // Normalize team names for matching
 export function normalizeTeamName(name: string): string {
@@ -52,6 +59,9 @@ export interface TeamMatchup {
     awayScore: number | null;
     venue: string | null;
     broadcast: string | null;
+    // ESPN week the game is played in; differs from the viewed week when a
+    // double-game has rolled forward into a bye week
+    playedWeek: number;
   } | null;
   odds: MatchupOdds | null;
 }
@@ -264,58 +274,41 @@ async function getStoredOddsByEventId(
 
 /**
  * Net points each rostered team has earned across the season, per the
- * scoring rules, from FINAL Game rows. Counts only weeks inside each
- * slot's effective window (fromWeek/toWeek) so swaps never double-count.
+ * scoring rules, from FINAL Game rows. Every game counts (attributed by
+ * scoring week), and only weeks inside each slot's effective window
+ * (fromWeek/toWeek) so swaps never double-count.
  */
-async function getSeasonPointsByTeam(
-  seasonYear: number,
+function getSeasonPointsByTeam(
+  scoringWeeks: ScoringWeekMap,
   rosterSlots: Array<{ teamId: number; fromWeek: number; toWeek: number | null }>
-): Promise<Map<number, number>> {
-  const teamIds = rosterSlots.map((rs) => rs.teamId);
-  if (teamIds.length === 0) return new Map();
-
-  const finishedGames = await prisma.game.findMany({
-    where: {
-      seasonYear,
-      status: 'FINAL',
-      winnerTeamId: { not: null },
-      OR: [{ homeTeamId: { in: teamIds } }, { awayTeamId: { in: teamIds } }],
-    },
-    select: {
-      homeTeamId: true,
-      awayTeamId: true,
-      winnerTeamId: true,
-      wasUpset: true,
-      weekNumber: true,
-    },
-  });
-
-  // One game per team per week (duplicate rows are rare but possible after
-  // postponements; first FINAL wins, matching the standings drill-down)
-  const gameByTeamWeek = new Map<string, (typeof finishedGames)[number]>();
-  for (const game of finishedGames) {
-    for (const tid of [game.homeTeamId, game.awayTeamId]) {
-      const key = `${tid}:${game.weekNumber}`;
-      if (!gameByTeamWeek.has(key)) gameByTeamWeek.set(key, game);
-    }
-  }
-
+): Map<number, number> {
   const points = new Map<number, number>();
   for (const rs of rosterSlots) {
     let total = 0;
-    for (const [key, game] of gameByTeamWeek) {
-      const [tidStr, weekStr] = key.split(':');
-      if (parseInt(tidStr) !== rs.teamId) continue;
-      const gameWeek = parseInt(weekStr);
-      if (gameWeek < rs.fromWeek) continue;
-      if (rs.toWeek !== null && gameWeek > rs.toWeek) continue;
-      const won = game.winnerTeamId === rs.teamId;
-      total += won ? (game.wasUpset ? 2 : 1) : game.wasUpset ? -1 : 0;
+    for (const [week, games] of scoringWeeks.get(rs.teamId) ?? []) {
+      if (week < rs.fromWeek) continue;
+      if (rs.toWeek !== null && week > rs.toWeek) continue;
+      for (const game of games) total += pointsForTeam(game, rs.teamId);
     }
     points.set(rs.teamId, total);
   }
-
   return points;
+}
+
+/** Present a stored Game row the way the ESPN scoreboard parser would. */
+function gameRowStatus(status: ScoredGame['status']): ParsedGame['status'] {
+  switch (status) {
+    case 'FINAL':
+      return 'final';
+    case 'IN_PROGRESS':
+      return 'in_progress';
+    case 'POSTPONED':
+      return 'postponed';
+    case 'CANCELLED':
+      return 'cancelled';
+    default:
+      return 'scheduled';
+  }
 }
 
 /**
@@ -409,11 +402,13 @@ export async function getRosterMatchups(
   // Stored odds for the week's games (DB only — never the live Odds API)
   const oddsByEventId = await getStoredOddsByEventId(seasonYear, week);
 
-  // Season net points per rostered team, from finished Game rows with the
-  // same formula scoring uses (win 1, upset win 2, loss 0, upset loss -1).
-  // Each slot only counts weeks inside its effective window, so a swapped-in
-  // team starts from its fromWeek.
-  const seasonPointsByTeam = await getSeasonPointsByTeam(seasonYear, rosterSlots);
+  // Every rostered team's games attributed to scoring weeks: season net
+  // points (same formula scoring uses) and bye-week roll-ins both read it.
+  const scoringWeeks = await loadScoringWeekMap(
+    seasonYear,
+    rosterSlots.map((rs) => rs.teamId)
+  );
+  const seasonPointsByTeam = getSeasonPointsByTeam(scoringWeeks, rosterSlots);
 
   // Build matchup data for each rostered team
   const matchups: TeamMatchup[] = rosterSlots.map((rt) => {
@@ -446,6 +441,7 @@ export async function getRosterMatchups(
         awayScore: game.awayScore,
         venue: game.venue,
         broadcast: game.broadcast,
+        playedWeek: week,
       };
 
       // Look up stored odds by ESPN event id
@@ -464,6 +460,40 @@ export async function getRosterMatchups(
             : null,
           teamMoneyline: isHome ? gameOdds.homeMoneyline : gameOdds.awayMoneyline,
         };
+      }
+    } else {
+      // No ESPN game this week: show a double-game that rolled forward into
+      // this bye week (FSU's Sep 7 game counts as week 2), from the Game row
+      const rolled = gamesForTeamWeek(scoringWeeks, team.id, week).find(
+        (g) => g.weekNumber !== week
+      );
+      if (rolled) {
+        const isHome = rolled.homeTeamId === team.id;
+        const opponent = isHome ? rolled.awayTeam : rolled.homeTeam;
+        matchup.game = {
+          espnEventId: rolled.espnEventId,
+          opponent: opponent.espnDisplayName || opponent.name,
+          opponentAbbreviation: opponent.abbreviation || '',
+          startTime: rolled.startTime,
+          isHomeTeam: isHome,
+          status: gameRowStatus(rolled.status),
+          homeScore: rolled.homeScore,
+          awayScore: rolled.awayScore,
+          venue: rolled.venue,
+          broadcast: null,
+          playedWeek: rolled.weekNumber,
+        };
+        if (rolled.spread !== null) {
+          matchup.odds = {
+            spread: rolled.spread,
+            homeMoneyline: rolled.homeMoneyline,
+            awayMoneyline: rolled.awayMoneyline,
+            bookmaker: rolled.bookmaker,
+            isHomeTeam: isHome,
+            teamSpread: isHome ? rolled.spread : -rolled.spread,
+            teamMoneyline: isHome ? rolled.homeMoneyline : rolled.awayMoneyline,
+          };
+        }
       }
     }
 

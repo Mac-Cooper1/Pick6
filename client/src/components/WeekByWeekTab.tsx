@@ -170,9 +170,17 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
-                    {member.teams.map((team) => (
-                      <div key={team.teamId} className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-xs">
-                        <div className="label text-[11px] mb-0.5">{team.slotLabel}</div>
+                    {/* A team can appear twice: ESPN's Week 1 is two weekends */}
+                    {member.teams.map((team, i) => (
+                      <div key={`${team.teamId}-${i}`} className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-xs">
+                        <div className="label text-[11px] mb-0.5">
+                          {team.slotLabel}
+                          {team.playedWeek !== null && team.playedWeek !== week && (
+                            <span className="ml-1 normal-case tracking-normal text-amber-700" title="Played in an earlier ESPN week. Counts here because the team was off this week.">
+                              played wk {team.playedWeek}
+                            </span>
+                          )}
+                        </div>
                         <div className="font-semibold text-sm leading-tight break-words">{team.teamName}</div>
                         <div className="flex items-start justify-between gap-1 mt-1">
                           <span className="text-gray-500 break-words leading-tight min-w-0">

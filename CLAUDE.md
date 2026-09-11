@@ -28,7 +28,10 @@ turn — standing instruction from Mac)**.
   shuffling only members without positions),
   `syncService` (ESPN games → odds → finalize upsets → rescore; idempotent),
   `seasonService` (D6: ESPN week calendar, **current week is derived from the
-  clock, never stored**), `swapService` (WS8: turn order, 24h lazy-expiry
+  clock, never stored**), `scoringWeekService` (Sep 11: **every game a team
+  plays counts**; a second game inside one ESPN week rolls into the next
+  week if the team is off then, otherwise both count that week; the one
+  `pointsForTeam` formula; scoring, Week by Week and My Team all read it), `swapService` (WS8: turn order, 24h lazy-expiry
   clock, effective-week roster math), `teamMatcher` (`wasUpset` holds the
   ±3.5 threshold), `espnClient`, `oddsClient`, `matchupService` (League tab
   matchups — reads spreads from `Game` rows by `espnEventId`, **never** the
@@ -102,11 +105,13 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 43 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 58 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
-boundary, and the full swap lifecycle. It wipes/recreates its own data
-(league `SMOKE1`, `smoke1@test.local`/`smoke123`) — **never point it at
-prod**. Before ending a turn: `npx tsc` in `server/`, `npm run build` in
+boundary, the full swap lifecycle, double-game week attribution and the
+odds matcher. It wipes/recreates its own data (league `SMOKE1`,
+`smoke1@test.local`/`smoke123`) in its **own season year 2099** with a
+copied calendar, so real Game rows synced into the local DB can never
+collide with its synthetic games — **never point it at prod**. Before ending a turn: `npx tsc` in `server/`, `npm run build` in
 `client/`.
 
 **Phone-viewport checks** (no device needed): headless Chrome is installed —
@@ -128,6 +133,20 @@ connects. Tabs are component state, not routes — click the button by label.
 - **Render exports `NODE_ENV=production`**, so `npm ci` skips devDependencies
   — build commands must use `--include=dev` (prisma/vite/typescript live
   there). Never use Render's free Postgres (self-deletes after 30 days).
+- **The odds matcher must never "match" on ignorance.** Until Sep 11 it
+  compared alias-table lookups with `===`, so two un-aliased teams gave
+  `null === null` and any same-kickoff game could inherit another game's
+  line (Hawai'i vs UNLV got -29.5; the real line was UNLV -2.5).
+  `teamNamesAgree` now needs a positive signal. If a game has no line, that
+  is the correct outcome, not something to loosen. ESPN's game summary
+  (`pickcenter`) keeps the DraftKings closing line after the game, keyed by
+  event id: `POST /api/admin/repair-spreads/:season/:week` (dry run;
+  `?apply=true` writes + rescores) uses it to find and fix cross-matched
+  lines.
+- **`sync-current` covers three weeks**: previous (late finals, e.g. a game
+  that ends after ESPN's week boundary), current (full pipeline), next
+  (schedule only, so the attribution can tell a bye from an unsynced week).
+  Still one Odds API credit per run.
 - **Odds only attach to games that haven't kicked off** — after kickoff the
   spread is unrecoverable. The daily 11:00 UTC cron exists for this. Missing
   lines on FBS-vs-FCS blowouts are books-not-posting, not a bug; they
@@ -173,7 +192,7 @@ Week 1 games: **Aug 27–Sep 7** (dress-rehearsal target: the Aug 27–29
 slate). League drafts before Sep 5. Week 5 ends **Oct 4** → swap window
 auto-opens. Season ends Dec 12 (Army-Navy, week 15). No bowls, no CFP.
 
-## Status (as of Aug 23, 2026)
+## Status (as of Sep 11, 2026)
 
 Live on Render, single-service, cron active. All launch workstreams
 (WS1–WS10, D1–D7) done — LAUNCH_PLAN is history now, not a todo list. QA
@@ -211,4 +230,16 @@ Settings greys the player capacity + hides the share button when locked.
 `GET /rosters/:id/matchups?userId=` (swap card stays self-only) — and each
 card shows the team's season net points (computed from FINAL `Game` rows,
 effective-week windows respected; nothing new stored).
-Week 1 games are underway (dress rehearsal weekend).
+**Sep 11 (after weeks 1–2)**: three real-data bugs fixed. (1) Teams that
+played twice in ESPN's two-weekend Week 1 had their second game silently
+dropped (`findFirst`); now every game counts via `scoringWeekService`, with
+Mac's rule that the extra game rolls into a bye week (FSU's Sep 7 game =
+week 2). (2) FSU vs SMU ended after week 1 closed and was never re-synced
+(SMU stuck on TBD); `sync-current` now re-syncs the previous week too.
+(3) The odds matcher cross-matched un-aliased teams at the same kickoff
+(Hawai'i vs UNLV stored -29.5, real line UNLV -2.5; 8 week-1 games and
+several week-2 games carried another game's line); matcher fixed, plus the
+`repair-spreads` admin endpoint backed by ESPN's closing line. Idea parked
+in NOTES: ESPN's scoreboard embeds DraftKings lines per event id, which
+would retire the Odds API and name matching entirely.
+Week 2 games kick off Sep 12.

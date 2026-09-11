@@ -199,6 +199,9 @@ export interface WeekDetailTeam {
   wasUpset: boolean;
   teamSpread: number | null;
   gameStatus: string | null;
+  // ESPN week the game was played in; differs from the viewed week when a
+  // double-game (ESPN's two-weekend Week 1) rolled forward into a bye week
+  playedWeek: number | null;
 }
 
 export interface WeekDetailMember {
@@ -348,6 +351,7 @@ export interface TeamMatchup {
     awayScore: number | null;
     venue: string | null;
     broadcast: string | null;
+    playedWeek: number;
   } | null;
   odds: {
     spread: number | null;

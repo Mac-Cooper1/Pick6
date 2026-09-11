@@ -354,6 +354,9 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
             const teamSpread = m.odds?.teamSpread;
             const isLive = game?.status === 'in_progress';
             const isFinal = game?.status === 'final';
+            // Double-game rolled into this bye week (FSU's Sep 7 game counts as week 2)
+            const rolledIn =
+              game !== null && currentLeague?.currentWeek !== undefined && game.playedWeek !== currentLeague.currentWeek;
             const showScore = game && (isLive || isFinal) && game.homeScore !== null && game.awayScore !== null;
             const myScore = game ? (game.isHomeTeam ? game.homeScore : game.awayScore) : null;
             const oppScore = game ? (game.isHomeTeam ? game.awayScore : game.homeScore) : null;
@@ -470,6 +473,11 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
                     </div>
                   ) : (
                     <p className="text-sm text-gray-400 italic">No game this week</p>
+                  )}
+                  {rolledIn && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      Played in week {game.playedWeek}. Counts as this week's game because the team is off this week.
+                    </p>
                   )}
                 </div>
               </div>

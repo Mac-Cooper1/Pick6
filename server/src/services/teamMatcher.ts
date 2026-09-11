@@ -114,10 +114,12 @@ for (const [name, aliases] of Object.entries(TEAM_ALIASES)) {
 /**
  * Normalize a team name for comparison
  */
-function normalizeTeamName(name: string): string {
+export function normalizeTeamName(name: string): string {
   return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Fold diacritics (San José → San Jose)
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '') // Remove special chars
+    .replace(/[^a-z0-9\s]/g, '') // Remove special chars (Hawai'i → Hawaii)
     .replace(/\s+/g, ' ') // Normalize whitespace
     .trim();
 }
@@ -126,21 +128,44 @@ function normalizeTeamName(name: string): string {
  * Find the canonical team name from any alias
  */
 export function findCanonicalName(input: string): string | null {
-  const normalized = normalizeTeamName(input);
+  // Exact alias match only. A substring pass used to live here, but the
+  // alias table is deliberately partial (no Texas State, no Miami (OH)
+  // variants), so "Texas State Bobcats" resolved to Texas and "Miami (OH)
+  // RedHawks" to Miami (FL). Unknown names return null and are compared
+  // as plain strings instead.
+  return ALIAS_TO_NAME.get(normalizeTeamName(input)) ?? null;
+}
 
-  // Direct match
-  if (ALIAS_TO_NAME.has(normalized)) {
-    return ALIAS_TO_NAME.get(normalized)!;
+/**
+ * Do two team names (ESPN display name vs The Odds API name) refer to the
+ * same school? True on an exact normalized match, a shared alias-table
+ * canonical name, or, as a last resort for name variants like "Southern
+ * Miss" vs "Southern Mississippi", the same first word AND the same mascot.
+ * Two names that both miss the alias table are NOT a match by default: the
+ * old `findCanonicalName(a) === findCanonicalName(b)` check compared
+ * null === null and matched any two unlisted teams, which is how Hawai'i vs
+ * UNLV inherited a -29.5 line from another 10pm ET kickoff in week 1.
+ */
+export function teamNamesAgree(a: string, b: string): boolean {
+  const na = normalizeTeamName(a);
+  const nb = normalizeTeamName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+
+  const ca = findCanonicalName(a);
+  const cb = findCanonicalName(b);
+  if (ca !== null && cb !== null) return ca === cb;
+
+  // "southern miss golden eagles" vs "southern mississippi golden eagles",
+  // "miami hurricanes" vs "miami fl hurricanes": same leading word and same
+  // mascot. Still separates Texas/Texas State (Longhorns/Bobcats) and
+  // Miami/Miami (OH) (Hurricanes/RedHawks).
+  const wa = na.split(' ');
+  const wb = nb.split(' ');
+  if (wa.length >= 2 && wb.length >= 2) {
+    return wa[0] === wb[0] && wa[wa.length - 1] === wb[wb.length - 1];
   }
-
-  // Try partial matches
-  for (const [alias, canonical] of ALIAS_TO_NAME.entries()) {
-    if (normalized.includes(alias) || alias.includes(normalized)) {
-      return canonical;
-    }
-  }
-
-  return null;
+  return false;
 }
 
 /**
@@ -175,8 +200,10 @@ export async function findTeamByName(name: string) {
 }
 
 /**
- * Match ESPN game data to Odds API data
- * Returns the matched odds or null if no match found
+ * Match an ESPN game to an Odds API event: same kickoff (±window) AND both
+ * teams agree by name. If the book lists home/away the other way round
+ * (neutral-site games do this), the returned copy is flipped so `spread`
+ * is still the ESPN home team's spread.
  */
 export function matchGameToOdds(
   game: ParsedGame,
@@ -184,35 +211,28 @@ export function matchGameToOdds(
   timeWindowMinutes: number = 60
 ): ParsedOdds | null {
   const gameTime = game.startTime.getTime();
+  const espnHome = game.homeTeam.displayName;
+  const espnAway = game.awayTeam.displayName;
 
   for (const odds of allOdds) {
-    const oddsTime = odds.commenceTime.getTime();
-    const timeDiff = Math.abs(gameTime - oddsTime);
-
-    // Check if within time window
+    const timeDiff = Math.abs(gameTime - odds.commenceTime.getTime());
     if (timeDiff > timeWindowMinutes * 60 * 1000) {
       continue;
     }
 
-    // Try to match teams
-    const espnHome = normalizeTeamName(game.homeTeam.displayName);
-    const espnAway = normalizeTeamName(game.awayTeam.displayName);
-    const oddsHome = normalizeTeamName(odds.homeTeam);
-    const oddsAway = normalizeTeamName(odds.awayTeam);
-
-    // Check for team name match (either direction since ESPN/Odds might differ on home/away)
-    const homeMatch =
-      espnHome.includes(oddsHome) ||
-      oddsHome.includes(espnHome) ||
-      findCanonicalName(game.homeTeam.displayName) === findCanonicalName(odds.homeTeam);
-
-    const awayMatch =
-      espnAway.includes(oddsAway) ||
-      oddsAway.includes(espnAway) ||
-      findCanonicalName(game.awayTeam.displayName) === findCanonicalName(odds.awayTeam);
-
-    if (homeMatch && awayMatch) {
+    if (teamNamesAgree(espnHome, odds.homeTeam) && teamNamesAgree(espnAway, odds.awayTeam)) {
       return odds;
+    }
+
+    if (teamNamesAgree(espnHome, odds.awayTeam) && teamNamesAgree(espnAway, odds.homeTeam)) {
+      return {
+        ...odds,
+        homeTeam: odds.awayTeam,
+        awayTeam: odds.homeTeam,
+        spread: odds.spread === null ? null : -odds.spread,
+        favoriteTeam:
+          odds.favoriteTeam === 'home' ? 'away' : odds.favoriteTeam === 'away' ? 'home' : null,
+      };
     }
   }
 

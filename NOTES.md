@@ -31,6 +31,16 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## V2 ideas
 
+- **Take lines from ESPN instead of The Odds API.** ESPN's scoreboard
+  response (the one the sync already fetches) embeds `competitions[0].odds`
+  with the DraftKings spread for 84 of 86 week-2 games, keyed by the same
+  event id we store, and the game summary keeps the closing line after the
+  game. That removes the Odds API (500 credits/month, one cron spender),
+  the ±60-minute time window and every name-matching heuristic in
+  `teamMatcher`. Same book (DraftKings) as today. Not a mid-season change:
+  the stored line is "the line scoring uses" and swapping sources could
+  move a game across the 3.5 boundary. Sep 11.
+
 - **"Best available" ordering + team rankings in the draft room.** The
   available-teams list (and the "All" filter) is alphabetical within slot
   today. V2: give every team a power ranking (AP where ranked; something like

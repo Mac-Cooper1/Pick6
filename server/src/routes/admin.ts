@@ -8,6 +8,7 @@ import {
   syncOddsEndpoint,
   finalizeGamesEndpoint,
   gameOverrideEndpoint,
+  repairSpreadsEndpoint,
   previewEspnGames,
   previewCurrentOdds,
   getGames,
@@ -37,6 +38,7 @@ router.post('/sync-all-leagues/:seasonYear/:weekNumber', asyncHandler(syncAllLea
 
 // Commissioner escape hatches
 router.post('/game-override', asyncHandler(gameOverrideEndpoint));
+router.post('/repair-spreads/:seasonYear/:weekNumber', asyncHandler(repairSpreadsEndpoint));
 router.post('/reset-password', asyncHandler(resetPasswordEndpoint));
 
 // Preview endpoints (read-only)

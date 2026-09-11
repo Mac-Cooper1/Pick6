@@ -29,6 +29,8 @@ Each team scores **exactly one** of the four outcomes per week — the values do
 
 The season runs on ESPN's official calendar, **regular season only**: 2026 is weeks 1–15, from the opening games of Aug 22–29 through Army-Navy on Dec 12. Bowls and the College Football Playoff do not count. (There is no "Week 0" — the late-August openers are part of Week 1, which runs through Labor Day.)
 
+**Every game your team plays counts.** Because ESPN's Week 1 covers two weekends, some teams play twice in it. A team's first game counts as its Week 1 game; its second game counts as its **Week 2 game if the team is off in Week 2** (Florida State: Aug 29 = Week 1, Sep 7 vs SMU = Week 2). If the team also plays in Week 2 (UNLV played Aug 30, Sep 6 and Sep 12), both early games count in Week 1. Season totals are the same either way; only the column changes.
+
 ## Standings
 
 One shared leaderboard, cumulative all season. No head-to-head matchups — just points stacking up. Check the **Standings** tab for the current week and overall race.

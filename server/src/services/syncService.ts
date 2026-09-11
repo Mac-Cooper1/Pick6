@@ -10,6 +10,12 @@ import { ConferenceSlot, GameStatus } from '@prisma/client';
 import { getGamesForWeek, ParsedGame } from './espnClient';
 import { getNCAAFSpreads, isOddsApiConfigured, ParsedOdds } from './oddsClient';
 import { findTeamByEspnId, matchGameToOdds, wasUpset } from './teamMatcher';
+import {
+  gamesForTeamWeek,
+  getLastWeek,
+  loadScoringWeekMap,
+  pointsForTeam,
+} from './scoringWeekService';
 
 /**
  * Resolve an ESPN team to a DB team, creating an unslotted stub for unknown
@@ -105,6 +111,11 @@ export async function syncWeekGames(
           homeScore: espnGame.homeScore,
           awayScore: espnGame.awayScore,
           winnerTeamId,
+          // ESPN moves games (weather, TV); the row must follow so the
+          // scoring-week attribution sees the real kickoff and week
+          startTime: espnGame.startTime,
+          weekNumber,
+          venue: espnGame.venue,
         },
         create: {
           espnEventId: espnGame.espnEventId,
@@ -139,8 +150,10 @@ export async function syncWeekGames(
  */
 export async function syncOdds(
   seasonYear?: number,
-  weekNumber?: number
+  weekNumber?: number | number[]
 ): Promise<{ updated: number; errors: string[] }> {
+  const weekNumbers =
+    weekNumber === undefined ? undefined : Array.isArray(weekNumber) ? weekNumber : [weekNumber];
   const errors: string[] = [];
 
   if (!isOddsApiConfigured()) {
@@ -166,7 +179,7 @@ export async function syncOdds(
     where: {
       status: GameStatus.SCHEDULED,
       ...(seasonYear !== undefined ? { seasonYear } : {}),
-      ...(weekNumber !== undefined ? { weekNumber } : {}),
+      ...(weekNumbers !== undefined ? { weekNumber: { in: weekNumbers } } : {}),
     },
     include: {
       homeTeam: true,
@@ -267,20 +280,17 @@ export async function finalizeGames(
 }
 
 /**
- * Calculate weekly scores for a league based on Game data
+ * Calculate weekly scores for a league based on Game data.
+ *
+ * Each member's roster is read as of the scored week (effective-week
+ * windows), and each team's games come from the scoring-week attribution
+ * (scoringWeekService): every game counts, and a team that plays twice in
+ * one ESPN week has its extra game rolled into its next bye week.
  */
 export async function calculateLeagueScores(
   leagueId: number,
   weekNumber: number
 ): Promise<{ scores: Array<{ userId: number; userName: string; points: number }> }> {
-  // Get all league members with their roster teams
-  const members = await prisma.leagueMember.findMany({
-    where: { leagueId },
-    include: {
-      user: true,
-    },
-  });
-
   const league = await prisma.league.findUnique({
     where: { id: leagueId },
   });
@@ -289,49 +299,45 @@ export async function calculateLeagueScores(
     throw new Error(`League ${leagueId} not found`);
   }
 
+  const members = await prisma.leagueMember.findMany({
+    where: { leagueId },
+    include: {
+      user: true,
+    },
+  });
+
+  // Every roster row active during this week (effective-week window), so a
+  // post-week-5 swap can never rewrite already-played weeks.
+  const rosterSlots = await prisma.rosterSlot.findMany({
+    where: {
+      leagueId,
+      fromWeek: { lte: weekNumber },
+      OR: [{ toWeek: null }, { toWeek: { gte: weekNumber } }],
+    },
+  });
+
+  const scoringWeeks = await loadScoringWeekMap(
+    league.seasonYear,
+    rosterSlots.map((rs) => rs.teamId)
+  );
+
   const scores: Array<{ userId: number; userName: string; points: number }> = [];
 
   for (const member of members) {
-    // Roster that was active during this week (effective-week window), so a
-    // post-week-5 swap can never rewrite already-played weeks.
-    const rosterSlots = await prisma.rosterSlot.findMany({
-      where: {
-        leagueId,
-        userId: member.userId,
-        fromWeek: { lte: weekNumber },
-        OR: [{ toWeek: null }, { toWeek: { gte: weekNumber } }],
-      },
-    });
-    const teamIds = rosterSlots.map((rs) => rs.teamId);
-
-    // Calculate points from Game data
     let totalPoints = 0;
 
-    for (const teamId of teamIds) {
-      // Find games where this team played this week
-      const game = await prisma.game.findFirst({
-        where: {
-          seasonYear: league.seasonYear,
-          weekNumber,
-          status: GameStatus.FINAL,
-          OR: [{ homeTeamId: teamId }, { awayTeamId: teamId }],
-        },
-      });
+    for (const slot of rosterSlots) {
+      if (slot.userId !== member.userId) continue;
 
-      if (game && game.winnerTeamId) {
-        const teamWon = game.winnerTeamId === teamId;
-
-        if (teamWon) {
-          totalPoints += game.wasUpset ? 2 : 1; // Upset win = 2, regular win = 1
-        } else {
-          totalPoints += game.wasUpset ? -1 : 0; // Upset loss = -1, regular loss = 0
+      for (const game of gamesForTeamWeek(scoringWeeks, slot.teamId, weekNumber)) {
+        if (game.status === GameStatus.FINAL && !game.winnerTeamId) {
+          // FINAL games always carry a winner; this is a tie/override edge
+          // case — explicit 0 points, logged for visibility
+          console.log(
+            `[Scores] No winner for game ${game.espnEventId} (status ${game.status}) — team ${slot.teamId} scores 0 in week ${weekNumber}`
+          );
         }
-      } else if (game && !game.winnerTeamId) {
-        // FINAL games always carry a winner; this is a postponed/cancelled/
-        // tie edge case — explicit 0 points, logged for visibility
-        console.log(
-          `[Scores] No winner for game ${game.espnEventId} (status ${game.status}) — team ${teamId} scores 0 in week ${weekNumber}`
-        );
+        totalPoints += pointsForTeam(game, slot.teamId);
       }
     }
 
@@ -365,6 +371,22 @@ export async function calculateLeagueScores(
 
   console.log(`[Sync] Calculated scores for ${scores.length} members in league ${leagueId}`);
   return { scores };
+}
+
+/**
+ * Rescore one week for every league that has drafted. Returns league ids.
+ */
+export async function rescoreWeekForAllLeagues(
+  seasonYear: number,
+  weekNumber: number
+): Promise<number[]> {
+  const leagues = await prisma.league.findMany({
+    where: { draftComplete: true, seasonYear },
+  });
+  for (const league of leagues) {
+    await calculateLeagueScores(league.id, weekNumber);
+  }
+  return leagues.map((l) => l.id);
 }
 
 /**
@@ -440,4 +462,77 @@ export async function syncAllLeagues(
   await autoOpenSwapWindows(seasonYear, weekNumber);
 
   return { leagueResults };
+}
+
+export interface SyncWindowResult {
+  currentWeek: number;
+  weeksSynced: number[];
+  weeksScored: number[];
+  gamesSynced: number;
+  oddsUpdated: number;
+  leaguesScored: number;
+  errors: string[];
+}
+
+/**
+ * The scheduled sync: previous, current and next week in one pass.
+ *
+ *  - previous week: games + finalize + rescore, so a game that finishes
+ *    after ESPN's week boundary (FSU vs SMU ended Tuesday 2am ET, week 1
+ *    closed at 3am) still lands. Before this, only the current week was
+ *    ever touched and SMU sat on TBD.
+ *  - current week: the usual games → odds → finalize → rescore.
+ *  - next week: games only (plus any early lines), so the scoring-week
+ *    attribution can tell a bye from a not-yet-synced week when it decides
+ *    whether a double-game rolls forward.
+ *
+ * Still ONE Odds API call per run (the response covers every upcoming game).
+ */
+export async function syncCurrentWindow(
+  seasonYear: number,
+  currentWeek: number
+): Promise<SyncWindowResult> {
+  const lastWeek = await getLastWeek(seasonYear);
+  const previousWeek = currentWeek > 1 ? currentWeek - 1 : null;
+  const nextWeek = currentWeek < lastWeek ? currentWeek + 1 : null;
+  const weeksSynced = [previousWeek, currentWeek, nextWeek].filter(
+    (w): w is number => w !== null
+  );
+  const weeksScored = [previousWeek, currentWeek].filter((w): w is number => w !== null);
+
+  const errors: string[] = [];
+  let gamesSynced = 0;
+
+  for (const week of weeksSynced) {
+    try {
+      const { games, errors: gameErrors } = await syncWeekGames(seasonYear, week);
+      gamesSynced += games.length;
+      errors.push(...gameErrors);
+    } catch (error: any) {
+      errors.push(`Week ${week} games: ${error.message}`);
+    }
+  }
+
+  const { updated: oddsUpdated, errors: oddsErrors } = await syncOdds(seasonYear, weeksSynced);
+  errors.push(...oddsErrors);
+
+  const leagueIds = new Set<number>();
+  for (const week of weeksScored) {
+    await finalizeGames(seasonYear, week);
+    for (const id of await rescoreWeekForAllLeagues(seasonYear, week)) leagueIds.add(id);
+  }
+
+  // Once week 5 is behind us, swap windows open themselves (WS8).
+  const { autoOpenSwapWindows } = await import('./swapService');
+  await autoOpenSwapWindows(seasonYear, currentWeek);
+
+  return {
+    currentWeek,
+    weeksSynced,
+    weeksScored,
+    gamesSynced,
+    oddsUpdated,
+    leaguesScored: leagueIds.size,
+    errors,
+  };
 }
