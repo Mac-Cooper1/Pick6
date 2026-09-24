@@ -605,6 +605,23 @@ async function main() {
   assert(teamNamesAgree('Southern Miss Golden Eagles', 'Southern Mississippi Golden Eagles'), 'same first word + mascot agree');
   assert(!teamNamesAgree('Texas Longhorns', 'Texas State Bobcats'), 'Texas ≠ Texas State');
   assert(!teamNamesAgree('Miami Hurricanes', 'Miami (OH) RedHawks'), 'Miami ≠ Miami (OH)');
+  // ESPN vs Odds API names with no shared first word (week 3–4 lines went missing)
+  const appState = matchGameToOdds(
+    espnGame('NC State Wolfpack', 'App State Mountaineers', kick),
+    [oddsEvent('NC State Wolfpack', 'Appalachian State Mountaineers', -14, kick)]
+  );
+  assert(appState?.spread === -14, `App State ↔ Appalachian State gets its line (got ${appState?.spread})`);
+  for (const [espn, odds] of [
+    ['Massachusetts Minutemen', 'UMass Minutemen'],
+    ['Long Island University Sharks', 'LIU Sharks'],
+    ['The Citadel Bulldogs', 'Citadel Bulldogs'],
+    ['SE Louisiana Lions', 'Southeastern Louisiana Lions'],
+    ['UAlbany Great Danes', 'Albany'],
+    ['Arkansas-Pine Bluff Golden Lions', 'Arkansas Pine Bluff Golden Lions'], // hyphenated alias key
+  ]) {
+    assert(teamNamesAgree(espn, odds), `${espn} ↔ ${odds}`);
+  }
+  assert(!teamNamesAgree('App State Mountaineers', 'West Virginia Mountaineers'), 'App State ≠ West Virginia (shared mascot)');
 
   // ---------- Summary ----------
   console.log(`\n${failed === 0 ? '🎉' : '💥'} ${passed} passed, ${failed} failed`);

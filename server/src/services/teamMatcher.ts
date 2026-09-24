@@ -93,21 +93,32 @@ const TEAM_ALIASES: Record<string, string[]> = {
   // Independents
   'Notre Dame': ['Notre Dame Fighting Irish'],
   Army: ['Army Black Knights', 'Army West Point'],
-  UMass: ['UMass Minutemen', 'Massachusetts'],
+  UMass: ['UMass Minutemen', 'Massachusetts', 'Massachusetts Minutemen'],
 
   // Group of 5 (partial list)
   'Boise State': ['Boise State Broncos'],
   Memphis: ['Memphis Tigers'],
   Tulane: ['Tulane Green Wave'],
   'Miami (OH)': ['Miami (Ohio) RedHawks', 'Miami Ohio'],
+  // ESPN "App State", The Odds API "Appalachian State": no shared first word,
+  // so without this every App State game went lineless
+  'App State': ['App State Mountaineers', 'Appalachian State Mountaineers'],
+
+  // FCS opponents whose ESPN and Odds API names differ
+  LIU: ['Long Island University Sharks', 'LIU Sharks'],
+  'The Citadel': ['The Citadel Bulldogs', 'Citadel Bulldogs'],
+  'SE Louisiana': ['SE Louisiana Lions', 'Southeastern Louisiana Lions'],
+  UAlbany: ['UAlbany Great Danes', 'Albany'],
+  'Arkansas-Pine Bluff': ['Arkansas-Pine Bluff Golden Lions', 'Arkansas Pine Bluff Golden Lions'],
 };
 
-// Build reverse lookup map
+// Build reverse lookup map. Keys get the same normalization as lookups, or
+// an alias with punctuation (Arkansas-Pine Bluff, Texas A&M) never matches.
 const ALIAS_TO_NAME: Map<string, string> = new Map();
 for (const [name, aliases] of Object.entries(TEAM_ALIASES)) {
-  ALIAS_TO_NAME.set(name.toLowerCase(), name);
+  ALIAS_TO_NAME.set(normalizeTeamName(name), name);
   for (const alias of aliases) {
-    ALIAS_TO_NAME.set(alias.toLowerCase(), name);
+    ALIAS_TO_NAME.set(normalizeTeamName(alias), name);
   }
 }
 
