@@ -105,7 +105,7 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 58 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 66 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the full swap lifecycle, double-game week attribution and the
 odds matcher. It wipes/recreates its own data (league `SMOKE1`,
@@ -138,7 +138,14 @@ connects. Tabs are component state, not routes — click the button by label.
   `null === null` and any same-kickoff game could inherit another game's
   line (Hawai'i vs UNLV got -29.5; the real line was UNLV -2.5).
   `teamNamesAgree` now needs a positive signal. If a game has no line, that
-  is the correct outcome, not something to loosen. ESPN's game summary
+  is the correct outcome, not something to loosen. The flip side: when ESPN
+  and the Odds API name a school differently enough (App State /
+  Appalachian State, The Citadel / Citadel, UAlbany / Albany: 7 schools
+  as of Sep 24, all in `TEAM_ALIASES` now), every game that team plays
+  goes lineless until the pair is aliased. Full audit recipe: ESPN
+  scoreboards for weeks 1–15 vs the Odds API `/participants` list (1
+  credit), run through `teamNamesAgree`. `/events` (0 credits) only shows
+  games with posted lines. ESPN's game summary
   (`pickcenter`) keeps the DraftKings closing line after the game, keyed by
   event id: `POST /api/admin/repair-spreads/:season/:week` (dry run;
   `?apply=true` writes + rescores) uses it to find and fix cross-matched
