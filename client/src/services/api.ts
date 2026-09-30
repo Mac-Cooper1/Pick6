@@ -192,6 +192,7 @@ export interface WeekDetailTeam {
   slotLabel: string;
   teamId: number;
   teamName: string;
+  fromWeek: number; // > 1 = added in the week-6 swap
   opponent: string | null;
   result: 'W' | 'L' | 'pending' | 'none';
   scoreLine: string | null;
@@ -264,6 +265,7 @@ export interface SwapState {
   maxClaims: number;
   swapUsed: boolean;
   // Projected from current standings until the run, then the run's order
+  // (points and SOS as they were when it ran)
   order: Array<{
     position: number;
     userId: number;
@@ -271,7 +273,13 @@ export interface SwapState {
     points: number;
     sosTotal: number; // tiebreaker: lower combined SOS rank ranks higher
     swapUsed: boolean;
-    swap: { slotLabel: string; dropTeamName: string; addTeamName: string } | null;
+    listSize: number | null; // after the run only
+    swap: {
+      slotLabel: string;
+      dropTeamName: string;
+      addTeamName: string;
+      choice: number; // which line of their list went through
+    } | null;
   }>;
   myClaims: SwapClaim[];
 }

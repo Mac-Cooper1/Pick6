@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
+import { SwapBadge } from './SwapBadge';
 
 interface LeagueTabProps {
   leagueId: number;
@@ -166,6 +167,11 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
 
                         {/* Conference */}
                         <div className="label text-[11px]">{team.conference}</div>
+                        {team.fromWeek > 1 && (
+                          <div className="mt-1">
+                            <SwapBadge fromWeek={team.fromWeek} />
+                          </div>
+                        )}
 
                         {/* Matchup info */}
                         {league?.draftComplete && (

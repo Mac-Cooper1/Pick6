@@ -215,32 +215,57 @@ export function SwapTab({ leagueId }: SwapTabProps) {
             </p>
           </div>
 
-          {/* Order: projected chips before the run, results after */}
+          {/* Order: projected chips before the run, the recap after */}
           {phase === 'complete' ? (
             <div className="card p-4">
-              <p className="label mb-2">League swaps, in order</p>
+              <p className="label">How the swap went</p>
+              <p className="text-xs text-gray-500 mt-0.5 mb-2">
+                Reverse standings through week {swapWeek - 1}: the worst record went first. Players
+                tied on points were split by schedule strength, and the tougher combined SOS (the
+                lower number) went later.
+              </p>
               <ol className="divide-y divide-gray-100">
-                {order.map((o) => (
-                  <li key={o.userId} className="py-2 flex items-start gap-3">
-                    <span className="font-display font-bold text-lg leading-6 text-gray-400 w-6 text-center shrink-0">
-                      {o.position}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-gray-800">
-                        {o.userName}
-                        {o.userId === user?.id && <span className="text-gray-400 font-normal"> (you)</span>}
-                      </p>
-                      {o.swap ? (
-                        <p className="text-sm">
-                          <span className="label text-[11px] mr-1.5">{o.swap.slotLabel}</span>
-                          <Pair drop={o.swap.dropTeamName} add={o.swap.addTeamName} />
-                        </p>
-                      ) : (
-                        <p className="text-sm text-gray-400">{o.swapUsed ? 'Swapped earlier' : 'No swap'}</p>
-                      )}
-                    </div>
-                  </li>
-                ))}
+                {order.map((o) => {
+                  const you = o.userId === user?.id;
+                  const listSize = o.listSize ?? 0;
+                  const noSwap = o.swapUsed
+                    ? 'Swapped earlier'
+                    : listSize === 0
+                    ? `No swap: ${you ? 'you' : 'they'} didn't set a list`
+                    : `No swap: none of ${you ? 'your' : 'their'} ${listSize} ${listSize === 1 ? 'choice' : 'choices'} went through`;
+                  return (
+                    <li key={o.userId} className="py-2.5 flex items-start gap-3">
+                      <span className="font-display font-bold text-lg leading-6 text-gray-400 w-6 text-center shrink-0">
+                        {o.position}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <p className="text-sm font-semibold text-gray-800 truncate">
+                            {o.userName}
+                            {you && <span className="text-gray-400 font-normal"> (you)</span>}
+                          </p>
+                          <p className="text-xs text-gray-500 tabular-nums shrink-0">
+                            {o.points} {Math.abs(o.points) === 1 ? 'pt' : 'pts'}
+                            {tiedOnPoints(o.points) && ` · SOS ${o.sosTotal}`}
+                          </p>
+                        </div>
+                        {o.swap ? (
+                          <div className="flex items-baseline justify-between gap-2 mt-0.5">
+                            <p className="text-sm min-w-0">
+                              <span className="label text-[11px] mr-1.5">{o.swap.slotLabel}</span>
+                              <Pair drop={o.swap.dropTeamName} add={o.swap.addTeamName} />
+                            </p>
+                            <span className="label text-[11px] text-green-700 shrink-0">
+                              {ordinal(o.swap.choice)} choice
+                            </span>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-400 mt-0.5">{noSwap}</p>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
               </ol>
             </div>
           ) : (

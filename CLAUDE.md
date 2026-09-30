@@ -52,7 +52,9 @@ turn — standing instruction from Mac)**.
   `/login` (`?mode=signup`), `/dashboard`, `/league/create|join`,
   `/league/:id` (tabs). Tabs: Leaderboard (default) · My Team (your five +
   weekly games with kickoff/venue/network/spread) ·
-  Week by Week (grid + per-week drill-down) · League (rosters + spreads) ·
+  Week by Week (grid + per-week drill-down) · League (current rosters +
+  spreads; `SwapBadge` marks swapped-in teams here, on My Team and in Week
+  by Week) ·
   Draft (live room) · Week 6 Swap (`SwapTab`: board of unowned teams by
   Pick 6 season points with one-tap Add, your ranked list, projected order,
   then the league's results). **Settings is not in the strip** since Sep 30:
@@ -99,6 +101,10 @@ turn — standing instruction from Mac)**.
   `prisma migrate dev`, review the generated SQL so it doesn't drop them.
 - Migrations are hand-authored (`prisma/migrations/202608*`) and applied with
   `migrate deploy` only. `db:reset` drops everything — dev only.
+- **Rosters come from `RosterSlot`, never `DraftPick`.** DraftPick is draft
+  history (the Draft tab's board); the week-6 swap and hand-added rosters
+  (league 8's late joiner) make the two differ. The League tab read draft
+  picks until Sep 30 (`getLeagueMembers` now uses `getAllRosters`).
 - Teams are keyed by `espnTeamId`; the seed fetches conference membership
   live from ESPN's **core** API per season (`/seasons/{yr}/types/2/groups/
   {id}/teams`) — realignment is a seed re-run, not a code change.
@@ -119,7 +125,7 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 88 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 90 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the

@@ -577,8 +577,10 @@ async function main() {
   );
   const carolView = await getSwapState(league.id, carol.id, listsOpen);
   assert(
-    carolView.myClaims.length === 1 && carolView.myClaims[0].dropTeamId === carolSEC,
-    "lists are private: Carol sees only her own line"
+    carolView.myClaims.length === 1 &&
+      carolView.myClaims[0].dropTeamId === carolSEC &&
+      carolView.order.every((o) => o.listSize === null),
+    "lists are private: Carol sees only her own line, and nobody's list size"
   );
 
   // The API refuses rostered teams, so no saved line can name a team that
@@ -652,6 +654,24 @@ async function main() {
   assert(
     bobResult.order.map((o) => o.userId).join() === [carol.id, bob.id, alice.id].join(),
     'run order: Carol, Bob, Alice'
+  );
+  // Their rosters changed in the run, so live SOS would now read 301 / 141
+  const [carolEntry, bobEntry, aliceEntry] = bobResult.order;
+  assert(
+    carolEntry.points === 1 &&
+      carolEntry.sosTotal === 300 &&
+      bobEntry.points === 1 &&
+      bobEntry.sosTotal === 100,
+    `recap keeps the numbers that set the order (tied at 1: SOS 300 vs 100; got ${carolEntry.sosTotal} vs ${bobEntry.sosTotal})`
+  );
+  assert(
+    carolEntry.swap?.choice === 1 &&
+      bobEntry.swap?.choice === 3 &&
+      aliceEntry.swap?.choice === 3 &&
+      carolEntry.listSize === 1 &&
+      bobEntry.listSize === 4 &&
+      aliceEntry.listSize === 3,
+    'recap shows which choice each player got and how long each list was'
   );
   assert(
     bobResult.myClaims.map((c) => c.status).join() === 'MISSED,MISSED,SWAPPED,UNUSED',

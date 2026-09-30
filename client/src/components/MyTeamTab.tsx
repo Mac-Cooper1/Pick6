@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
+import { SwapBadge } from './SwapBadge';
 import { DRAFT_SLOTS, SLOT_LABELS, ConferenceSlot } from '../types';
 
 interface MyTeamTabProps {
@@ -163,7 +164,7 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
               <div key={slot} className="card p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-baseline gap-2">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="label text-[11px]">{SLOT_LABELS[slot]}</span>
                       <span
                         className={`text-[11px] font-semibold tabular-nums ${
@@ -173,6 +174,7 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
                       >
                         {m.seasonPoints > 0 ? `+${m.seasonPoints}` : m.seasonPoints} {Math.abs(m.seasonPoints) === 1 ? 'pt' : 'pts'} season
                       </span>
+                      <SwapBadge fromWeek={m.fromWeek} />
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                       {teamRank && (
@@ -183,14 +185,6 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
                       <span className="font-display font-bold uppercase tracking-wide text-xl sm:text-2xl text-gray-900 truncate">
                         {m.teamName}
                       </span>
-                      {m.fromWeek > 1 && (
-                        <span
-                          className="label text-[11px] text-amber-700 shrink-0"
-                          title={`Swapped in. Counts from week ${m.fromWeek}.`}
-                        >
-                          wk {m.fromWeek}+
-                        </span>
-                      )}
                     </div>
                   </div>
 

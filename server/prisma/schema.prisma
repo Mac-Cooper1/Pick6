@@ -96,6 +96,8 @@ model LeagueMember {
   swapUsed    Boolean @default(false)
   swapSkipped Boolean @default(false) // legacy (turn-based window), unused
   swapOrder   Int? // run position, worst record first; set when the swap runs
+  swapPoints  Int? // points through week 5 when the swap ran (set the order)
+  swapSos     Int? // combined SOS rank when the swap ran (the tiebreaker)
 
   league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
