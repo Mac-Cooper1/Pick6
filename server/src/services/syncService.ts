@@ -7,7 +7,7 @@
 
 import prisma from '../lib/prisma';
 import { ConferenceSlot, GameStatus } from '@prisma/client';
-import { getGamesForWeek, ParsedGame } from './espnClient';
+import { fetchSosRanks, getGamesForWeek, ParsedGame } from './espnClient';
 import { getNCAAFSpreads, isOddsApiConfigured, ParsedOdds } from './oddsClient';
 import { findTeamByEspnId, matchGameToOdds, wasUpset } from './teamMatcher';
 import {
@@ -16,6 +16,7 @@ import {
   loadScoringWeekMap,
   pointsForTeam,
 } from './scoringWeekService';
+import { runDueSwaps, SwapRunResult } from './swapService';
 
 /**
  * Resolve an ESPN team to a DB team, creating an unslotted stub for unknown
@@ -243,6 +244,30 @@ export async function syncOdds(
 }
 
 /**
+ * Refresh every team's ESPN strength-of-schedule rank (the standings
+ * tiebreaker, see standingsService). One ESPN call, no quota.
+ */
+export async function syncSosRanks(seasonYear: number): Promise<number> {
+  const ranks = await fetchSosRanks(seasonYear);
+  const teams = await prisma.team.findMany({
+    where: { espnTeamId: { in: [...ranks.keys()] } },
+    select: { id: true, espnTeamId: true },
+  });
+
+  for (const team of teams) {
+    const sosRank = ranks.get(team.espnTeamId!)!;
+    await prisma.teamSos.upsert({
+      where: { seasonYear_teamId: { seasonYear, teamId: team.id } },
+      update: { sosRank },
+      create: { seasonYear, teamId: team.id, sosRank },
+    });
+  }
+
+  console.log(`[Sync] SOS ranks updated for ${teams.length} teams`);
+  return teams.length;
+}
+
+/**
  * Finalize games and determine upsets
  */
 export async function finalizeGames(
@@ -456,10 +481,10 @@ export async function syncAllLeagues(
     };
   }
 
-  // Once week 5 is behind us, swap windows open themselves (WS8).
-  // Lazy import avoids a module cycle (swapService → seasonService only).
-  const { autoOpenSwapWindows } = await import('./swapService');
-  await autoOpenSwapWindows(seasonYear, weekNumber);
+  // Once week 6 starts, every league's week-6 swap runs (idempotent), with
+  // fresh SOS ranks for the tiebreaker (a failure keeps the stored ones)
+  await syncSosRanks(seasonYear).catch((e) => console.error(`[Sync] SOS ranks: ${e.message}`));
+  await runDueSwaps(seasonYear);
 
   return { leagueResults };
 }
@@ -471,6 +496,8 @@ export interface SyncWindowResult {
   gamesSynced: number;
   oddsUpdated: number;
   leaguesScored: number;
+  sosRanksSynced: number;
+  swapsRun: SwapRunResult[];
   errors: string[];
 }
 
@@ -522,9 +549,24 @@ export async function syncCurrentWindow(
     for (const id of await rescoreWeekForAllLeagues(seasonYear, week)) leagueIds.add(id);
   }
 
-  // Once week 5 is behind us, swap windows open themselves (WS8).
-  const { autoOpenSwapWindows } = await import('./swapService');
-  await autoOpenSwapWindows(seasonYear, currentWeek);
+  // Strength-of-schedule ranks: the standings tiebreaker, refreshed before
+  // the swap below reads them. A failure keeps the last stored ranks.
+  let sosRanksSynced = 0;
+  try {
+    sosRanksSynced = await syncSosRanks(seasonYear);
+  } catch (error: any) {
+    errors.push(`SOS ranks: ${error.message}`);
+  }
+
+  // The week-6 swap runs here, right after week 5 was finalized and rescored
+  // above, so the order uses final standings. No-op until week 6 starts and
+  // for leagues that already ran.
+  let swapsRun: SwapRunResult[] = [];
+  try {
+    swapsRun = await runDueSwaps(seasonYear);
+  } catch (error: any) {
+    errors.push(`Week 6 swap: ${error.message}`);
+  }
 
   return {
     currentWeek,
@@ -533,6 +575,8 @@ export async function syncCurrentWindow(
     gamesSynced,
     oddsUpdated,
     leaguesScored: leagueIds.size,
+    sosRanksSynced,
+    swapsRun,
     errors,
   };
 }

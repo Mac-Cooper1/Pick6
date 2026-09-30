@@ -29,18 +29,21 @@ Smaller spreads and pick'ems score as regular results.
 
 **The season.** ESPN's official calendar, regular season only (2026: weeks 1–15, from the Aug 22 window through Army-Navy on Dec 12). Bowls and the CFP don't count. There is no "Week 0" — ESPN folds the late-August openers into Week 1, so some teams play twice in it. **Every game counts**: a team's second game in an ESPN week counts as the next week's game if the team is off that week (FSU's Sep 7 game = week 2); if the team also plays the next week, both games count in the same week.
 
-**Week-5 swap.** After week 5, every player gets one same-slot team swap (worst record picks first). Past weeks keep their points — scoring is roster-as-of-that-week. *(Automation lands in WS8.)*
+**Week-6 swap.** Every player gets one same-slot swap. During week 5 each player ranks a private list of swaps ("drop X, add Y", up to 10) on the Week 6 Swap tab, picking from every unowned team sorted by its Pick 6 points this season; when week 6 starts the scheduled sync runs every league at once in reverse standings (worst record first, ties by the tiebreaker below), and each player gets the highest swap on their list that's still possible. Only teams unowned at the lock can be added, so dropped teams stay out of play. Past weeks keep their points (scoring is roster-as-of-that-week); new teams count from week 6.
 
-**Standings.** One cumulative leaderboard. No head-to-head.
+**Standings.** One cumulative leaderboard. No head-to-head. **Tiebreaker**: on equal points, the lower combined ESPN FPI strength-of-schedule rank of a player's five teams ranks higher (1 = hardest schedule in FBS).
 
 ## Features
 
 - **Accounts**: email + password (bcrypt), JWT sessions; leagues joined by a 6-character code or a shared join link that presets it; members edit their display name in Settings
 - **Live snake draft**: Socket.IO rooms, server-time countdown clock, scheduled auto-start with a pre-draft lobby (order, presence, queue building), slot-aware pick validation, draft queue with AP-rank autopick fallback
 - **Draft order**: assigned when the draft is scheduled — random or set manually by the commissioner in Settings — and visible in the lobby before the first pick
-- **My Team**: your five teams with this week's game each — opponent, kickoff, venue, TV network (from ESPN), and the stored spread with what it means for scoring; also home of the week-5 swap flow
+- **My Team**: your five teams with this week's game each — opponent, kickoff, venue, TV network (from ESPN), and the stored spread with what it means for scoring
+- **Week 6 Swap tab**: every unowned team sorted by Pick 6 points this season (slot filters, your own team in that slot for comparison, one-tap Add), your ranked swap list, the projected order with the tiebreaker, and the league's results after the run
+- **Standings tiebreaker**: ESPN FPI strength of schedule, refreshed on every scheduled sync; one ordering (`standingsService`) drives the Leaderboard, Week by Week, the dashboard rank and the swap order
+- **Settings** opens from the header button (Log out lives in Settings; the dashboard, which has no settings page, keeps Log out in its header)
 - **Automated scoring**: ESPN scores + The Odds API spreads → upset detection (±3.5 rule) → weekly rescore, on a GitHub Actions schedule
-- **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-5 swap can never rewrite history
+- **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-6 swap can never rewrite history
 - **Matchup board**: each rostered team's upcoming opponent, kickoff, and spread (read from the DB — the exact line scoring will use) with AP rank badges
 - **Commissioner tools**: schedule the draft, "Sync now", manual game-result override, member password reset
 - **DB-enforced integrity**: partial unique indexes guarantee one owner per team and one team per slot
@@ -49,7 +52,7 @@ Smaller spreads and pick'ems score as regular results.
 
 **Frontend**: React 18 + TypeScript, Vite, Tailwind, React Router, TanStack Query, socket.io-client, Phosphor icons, self-hosted Barlow / Barlow Condensed (`@fontsource`)
 **Backend**: Node/Express + TypeScript, Prisma + PostgreSQL, Socket.IO, JWT + bcrypt
-**Data**: ESPN hidden API (scores, schedules, rankings, season calendar, team/conference membership) + The Odds API (spreads; 500 credits/mo free tier — only the sync pipeline spends them, ~1 credit per cron run; user traffic reads spreads from the DB)
+**Data**: ESPN hidden API (scores, schedules, rankings, season calendar, team/conference membership, FPI strength of schedule) + The Odds API (spreads; 500 credits/mo free tier — only the sync pipeline spends them, ~1 credit per cron run; user traffic reads spreads from the DB)
 
 ## Getting Started (local)
 
@@ -105,6 +108,10 @@ Leaves an inspectable "Smoke League" — sign in as `smoke1@test.local` / `smoke
 - **Sat 23:00 UTC** — mid-slate refresh
 - Manual: Actions tab → "Scheduled sync" → Run workflow
 
+**Strength-of-schedule ranks refresh here too** (`syncSosRanks`: one free ESPN core-API call, `powerindex` field `avgsosrank`, stored in `TeamSos` per season); a failed fetch keeps the last stored ranks.
+
+**The week-6 swap runs here too.** Each run ends by calling `runDueSwaps`: once week 6 has started (Mon 07:00 UTC, 3am ET), every drafted league that hasn't swapped yet is processed, right after week 5 was finalized and rescored in the same run, so the order uses final standings. In 2026 that's the Mon Oct 5 08:30 UTC run, with 11:00 UTC as the backstop (first week-6 kickoff: Tue Oct 6, 8pm ET). A league runs exactly once (`League.swapRanAt`); the response lists it under `swapsRun`. If the cron ever misses, Run workflow does the same thing.
+
 **Activate**: set repo secrets `API_URL` and `ADMIN_SECRET` (Settings → Secrets and variables → Actions). The cron lives outside the app server on purpose — a restart or deploy can never silently kill the schedule.
 
 ## API Overview
@@ -115,6 +122,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 |---|---|
 | Auth | public: `POST /api/auth/register` `POST /api/auth/login` · JWT: `GET /api/auth/me` `PATCH /api/auth/me` (name) |
 | Leagues | `GET /my` · `POST /create` · `POST /join` (code only) · `GET /:id` · `GET /:id/members` · `PATCH /:id/settings` |
+| Week-6 swap | `GET /leagues/:id/swap` (phase, lock time, order with tiebreak SOS, your list, results) · `GET /leagues/:id/swap/teams` (unowned teams by Pick 6 points + your five) · `PUT /leagues/:id/swap/claims` (replace your ranked list while lists are open) — the run itself happens in the scheduled sync |
 | Draft | `GET /:id/picks` · `GET /:id/available` · `GET /:id/state` · `POST /:id/start` (commissioner) · queue CRUD — live picks go over Socket.IO |
 | Rosters | `GET /:id` · `GET /:id/my` · `GET /:id/user/:userId` · `GET /:id/available` · `GET /:id/matchups[/all]` |
 | Standings | `GET /:id/week/:n` · `GET /:id/overall` |
@@ -130,7 +138,7 @@ pick6/
 ├── server/src/
 │   ├── controllers/       # auth, leagues, draft, rosters, standings, admin
 │   ├── services/          # draft, roster, sync (ESPN+odds pipeline), season calendar,
-│   │                      # matchups, teamMatcher, cache
+│   │                      # week-6 swap, matchups, teamMatcher, cache
 │   ├── socket/            # live draft room
 │   ├── middleware/        # JWT auth, admin gate, error handler
 │   └── lib/, utils/, types/
@@ -160,6 +168,22 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Sep 30, 2026 (later)** — Week 6 Swap tab, Settings in the header, and a standings tiebreaker (Mac's review of the swap build):
+- **Week 6 Swap tab** replaces the Settings tab in the strip. It holds the ranked list (moved off My Team) next to a board of **every unowned team sorted by its Pick 6 points this season**: the league's own formula over every game (win +1, upset win +2, loss 0, bust −1), whoever owned the team, plus W-L. Slot filter chips; picking a slot shows your team in it for comparison; **Add** puts a team on your list against your team in the same slot (one team per slot, so the drop is implied and a cross-slot line can't be built); listed teams show their list position. The board hides once the swap has run. New `GET /leagues/:id/swap/teams` (unowned teams + your five, via `seasonRecord` in `scoringWeekService`)
+- **Settings moved to the header**: the Log out button's spot is now a Settings button (gear, gold ring while open) and Log out lives in Settings' Your Profile card. The dashboard has no settings page, so its header keeps Log out
+- **Tiebreaker (standings and the swap order)**: on equal points, the **lower combined ESPN FPI strength-of-schedule rank** of a player's current five ranks higher. Source checked first: ESPN's core API `seasons/{year}/powerindex` field `avgsosrank` is exactly the SOS column on espn.com's FPI resume page (Western Kentucky 1st, UMass 138th today; 138 FBS teams, no gaps, matches the page's own feed for all 138) and every one of prod's 137 draftable teams maps to it by ESPN id. New `TeamSos` table (migration `20260930130000_team_sos`), refreshed by every scheduled sync (`syncSosRanks`, reported as `sosRanksSynced`) and right before the swap runs. An unranked team or empty slot counts as last rank + 1; exact ties on points and SOS fall back to join order
+- **One ordering everywhere**: new `standingsService.getStandings` (points → SOS → join) now drives the Leaderboard, Week by Week, the dashboard rank and the swap order, which is that list read bottom to top (the easier combined schedule swaps first). The Leaderboard shows "SOS n" under tied scores with a one-line explanation; the swap order chips show it for tied players. Prod today (read-only): every drafted league has at least one tie on points, and 8 of the 12 Kirven Pool players sit in tied groups, so this decides real swap positions
+- Verified: smoke test **88 assertions** (tie broken both directions, unranked fallback, leaderboard order, board sorting/records/ownership); `tsc` + `vite build` green; the SOS sync run against live ESPN into the local DB (138 teams); tab, board, one-tap Add, Settings/Log out and the post-run view driven in the browser at 1280 and 375 widths
+
+**Sep 30, 2026** — Week 6 Swap replaces the week-5 swap window (Mac's redesign, before week 5 kicks off):
+- **Why**: the WS8 window gave each player a 24h turn, worst record first, starting after week 5. In a 4+ player league that runs for days, so a turn could straddle a team's game (whose points? can you still drop it?), and anything dropped late in the order went to the players after, the best records, which is the opposite of what the swap is for
+- **New flow**: during week 5 every player ranks a private list of up to 10 same-slot swaps on My Team ("drop X, add Y", reorder/remove, saves on every change). Lists lock when week 6 starts on ESPN's calendar (Mon Oct 5, 3am ET), and the scheduled sync's first run of week 6 (08:30 UTC, after it finalizes and rescores week 5) runs every drafted league once: worst record through week 5 first (ties: earlier join), each player gets their highest line still possible, and every line records how it went (swapped / missed with the reason, e.g. "Dave took Florida earlier in the order" / not needed). Old team keeps weeks 1–5, new team counts from week 6
+- **Dropped teams are out of play**: only teams unowned at the lock can be added, so nobody later in the order can pick up a team someone ahead of them dropped. Safety net for a late run: a line whose team already kicked off in week 6 misses (first week-6 game is Tue Oct 6, so the Monday runs have a full day of slack)
+- **Server**: `swapService` rewritten (`getSwapSchedule` from `SeasonWeek`, `getSwapState`, `saveSwapClaims`, `runSwap` in one transaction that takes the league first so two syncs can't double-run it, `runDueSwaps` called by `syncCurrentWindow` / `syncAllLeagues`; `sync-current` now reports `swapsRun`). Routes: `GET /leagues/:id/swap` + `PUT /leagues/:id/swap/claims`; the turn-based `POST /swap`, `/swap/pass`, `/swap/open`, `/swap/close` are gone. The swap is automatic for every league, so the commissioner open/close card left Settings
+- **Migration `20260930120000_week6_swap_lists`** (additive): `SwapClaim` table + `SwapClaimStatus` enum, `League.swapRanAt`. The old `swapStatus` / `swapTurnDeadline` / `swapSkipped` columns stay unused so a rollback to the previous deploy still boots; dropping them is parked in NOTES.md. Prod check before the change (read-only): every drafted league still had its window unopened except test league 3, where the old window was opened early and one member already swapped; that swap stands and that member can't set a list
+- **Client**: swap UI with lists open → locked → done, the projected order and "You go 3rd of 10" (first built on My Team; moved to its own tab the same day, see the entry above), landing page and RULES.md copy updated
+- Verified: smoke test **81 assertions** (was 66; the turn-based swap section is replaced by lists, validation, privacy, run order, fallthrough, the dropped-team rule, the kickoff safety net, history and week-6 scoring, idempotent re-run), `tsc` + `vite build` green; list editor and results driven in the browser at 1280 and 375 widths against local leagues
 
 **Sep 24, 2026** — App State games had no betting line (NC State vs App State, week 4):
 - **Cause**: ESPN calls the school "App State Mountaineers", The Odds API "Appalachian State Mountaineers". Since the Sep 11 matcher fix, names must agree positively (exact, alias, or same first word + mascot) and this pair is none of those, so every App State game from week 3 on went lineless. Weeks 1–2 only got lines through the old `null === null` bug (both happened to be the right game: stored -19.5 / ECU -6.5 vs ESPN's DraftKings close APP -21 / ECU -6.5). Same failure for Massachusetts (odds feed: "UMass Minutemen") and the FCS stub Long Island University ("LIU Sharks")

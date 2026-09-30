@@ -92,6 +92,9 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
                   {standings.map((standing) => {
                     const me = standing.user.id === user?.id;
                     const first = standing.rank === 1;
+                    const tied = standings.some(
+                      (other) => other.user.id !== standing.user.id && other.points === standing.points
+                    );
                     return (
                       <tr
                         key={standing.user.id}
@@ -114,6 +117,11 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
                           }`}>
                             {standing.points}
                           </span>
+                          {tied && standing.sosTotal !== undefined && (
+                            <span className="block label text-[11px] mt-1" title="Combined ESPN strength-of-schedule rank of this player's five (lower is tougher)">
+                              SOS {standing.sosTotal}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -124,6 +132,10 @@ export function LeaderboardTab({ leagueId }: LeaderboardTabProps) {
               <p className="text-gray-500 text-center py-10 px-4">No scores yet this season</p>
             )}
           </div>
+          <p className="mt-2 text-xs text-gray-500">
+            Tied on points? The tougher combined schedule ranks higher: add up the ESPN strength-of-schedule
+            ranks of each player's five teams (1 is the hardest in FBS), and the lower total wins.
+          </p>
         </div>
 
         {/* Scoring legend: four outcomes, four tinted tiles */}

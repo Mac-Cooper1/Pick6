@@ -9,10 +9,8 @@ import {
 } from '../controllers/leagueController';
 import {
   getSwapStateEndpoint,
-  performSwapEndpoint,
-  passSwapEndpoint,
-  openSwapEndpoint,
-  closeSwapEndpoint,
+  getSwapTeamsEndpoint,
+  saveSwapClaimsEndpoint,
 } from '../controllers/swapController';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -29,11 +27,9 @@ router.get('/:leagueId', authenticate, asyncHandler(getLeague));
 router.get('/:leagueId/members', authenticate, asyncHandler(getLeagueMembers));
 router.patch('/:leagueId/settings', authenticate, asyncHandler(updateLeagueSettings));
 
-// Week-5 swap window (WS8)
+// Week-6 swap: private lists during week 5, run by the sync when week 6 starts
 router.get('/:leagueId/swap', authenticate, asyncHandler(getSwapStateEndpoint));
-router.post('/:leagueId/swap', authenticate, asyncHandler(performSwapEndpoint));
-router.post('/:leagueId/swap/pass', authenticate, asyncHandler(passSwapEndpoint));
-router.post('/:leagueId/swap/open', authenticate, asyncHandler(openSwapEndpoint));
-router.post('/:leagueId/swap/close', authenticate, asyncHandler(closeSwapEndpoint));
+router.get('/:leagueId/swap/teams', authenticate, asyncHandler(getSwapTeamsEndpoint));
+router.put('/:leagueId/swap/claims', authenticate, asyncHandler(saveSwapClaimsEndpoint));
 
 export default router;

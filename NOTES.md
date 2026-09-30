@@ -77,4 +77,12 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## Parking lot
 
-- (add future deferrals here)
+- **Drop the dead turn-based swap columns (2027 offseason).** The Sep 30
+  week-6 swap left `League.swapStatus`, `League.swapTurnDeadline`,
+  `LeagueMember.swapSkipped` and the `SwapStatus` enum unused on purpose, so
+  a mid-season rollback to the old deploy still boots. One migration drops
+  them once nobody would roll back past Sep 30.
+- **A league that finishes drafting after week 6 starts** gets its swap run
+  at the next sync with no lists (nobody could set one), i.e. no swaps.
+  Irrelevant for 2026 (every league drafted by Aug 29); if late drafts ever
+  happen, give such leagues their own lock time instead.

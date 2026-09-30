@@ -112,6 +112,7 @@ Boundaries are irregular — **never compute them; ingest them**:
 - [x] `RULES.md` committed as the game spec (current rules: slots incl. G6, ±3.5, snake draft, ESPN weeks 1–15, week-5 swap)
 
 ### WS8 — Automated week-5 swap ✅ DONE (Aug 4, 16 assertions green)
+*Superseded Sep 30, 2026 by the week-6 swap (ranked lists in week 5, one run at the start of week 6): see the README changelog. Kept below as history.*
 - [x] **Auto-opens** from the scheduled sync once the current week passes 5; order = ascending points through week 5 (tie → earlier join). Commissioner can also open/close manually (Settings)
 - [x] One swap each, same slot, unrostered target; **pass** moves the clock but keeps your swap usable in the free-for-all phase; 24h turn clock with **lazy expiry** (ticks whenever swap state is read — no extra cron)
 - [x] Effective-week roster math: old row closes, new row opens at `max(6, currentWeek)` — bumped a week if either team's game already started (no swapping in a team that already won). History is untouchable (smoke-verified)

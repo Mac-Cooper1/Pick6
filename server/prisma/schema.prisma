@@ -23,6 +23,7 @@ model User {
   weeklyScores  WeeklyScore[]
   rosterSlots   RosterSlot[]
   draftQueues   DraftQueue[]
+  swapClaims    SwapClaim[]
 }
 
 model League {
@@ -45,8 +46,14 @@ model League {
   currentPickNumber   Int       @default(0)
   currentPickDeadline DateTime?
 
-  // Week-5 swap window (auto-opens once week 5 is complete; turns run
-  // worst-record-first with a 24h clock, then free-for-all until closed)
+  // Week-6 swap: members set private priority lists (SwapClaim) during
+  // week 5; the scheduled sync runs every list once at the start of week 6,
+  // worst record first. null = not run yet.
+  swapRanAt DateTime?
+
+  // Legacy: the turn-based week-5 window (retired Sep 30, 2026). Unused, but
+  // kept so a rollback to the previous deploy still runs mid-season. Drop in
+  // the offseason (NOTES.md).
   swapStatus       SwapStatus @default(NOT_OPEN)
   swapTurnDeadline DateTime?
 
@@ -57,6 +64,7 @@ model League {
   weeklyScores WeeklyScore[]
   rosterSlots  RosterSlot[]
   draftQueues  DraftQueue[]
+  swapClaims   SwapClaim[]
 }
 
 enum DraftStatus {
@@ -84,10 +92,10 @@ model LeagueMember {
 
   role MemberRole @default(MEMBER)
 
-  // Week-5 swap: each member gets exactly one same-slot swap after week 5
+  // Week-6 swap: each member gets at most one same-slot swap
   swapUsed    Boolean @default(false)
-  swapSkipped Boolean @default(false) // passed/timed out on their turn
-  swapOrder   Int? // worst record first, assigned when the window opens
+  swapSkipped Boolean @default(false) // legacy (turn-based window), unused
+  swapOrder   Int? // run position, worst record first; set when the swap runs
 
   league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -128,6 +136,9 @@ model Team {
   awayGames    Game[]       @relation("AwayTeam")
   wonGames     Game[]       @relation("WinnerTeam")
   favoredGames Game[]       @relation("FavoriteTeam")
+  swapDrops    SwapClaim[]  @relation("SwapClaimDrop")
+  swapAdds     SwapClaim[]  @relation("SwapClaimAdd")
+  sosRanks     TeamSos[]
 
   @@index([espnTeamId])
   @@index([oddsApiName])
@@ -169,7 +180,7 @@ model DraftQueue {
 }
 
 // Roster ownership with effective-week windows. A row is active while
-// toWeek IS NULL; the week-5 swap closes the old row (toWeek = 5) and opens
+// toWeek IS NULL; the week-6 swap closes the old row (toWeek = 5) and opens
 // a new one (fromWeek = 6), so scoring week N always uses the roster that
 // was active during week N.
 //
@@ -195,6 +206,52 @@ model RosterSlot {
 
   @@index([leagueId, userId])
   @@index([leagueId, teamId])
+}
+
+// One line of a member's week-6 swap list ("drop X, add Y"), in priority
+// order. Private until the swap runs; the run then records each line's
+// outcome. Only teams nobody owns when lists lock can be added, so a team
+// dropped in the swap can't be picked up by anyone later in the order.
+model SwapClaim {
+  id         Int             @id @default(autoincrement())
+  leagueId   Int
+  userId     Int
+  priority   Int // 1 = first choice
+  dropTeamId Int
+  addTeamId  Int
+  status     SwapClaimStatus @default(PENDING)
+  note       String? // why a MISSED claim didn't go through
+  createdAt  DateTime        @default(now())
+
+  league   League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dropTeam Team   @relation("SwapClaimDrop", fields: [dropTeamId], references: [id])
+  addTeam  Team   @relation("SwapClaimAdd", fields: [addTeamId], references: [id])
+
+  @@unique([leagueId, userId, priority])
+}
+
+enum SwapClaimStatus {
+  PENDING // waiting for the run
+  SWAPPED // this line was the member's swap
+  MISSED // not possible when the member's turn came (see note)
+  UNUSED // a higher line already went through
+}
+
+// ESPN FPI strength of schedule for games already played (field avgsosrank,
+// the SOS column on espn.com/college-football/fpi/_/view/resume): 1 = the
+// hardest in FBS. Refreshed by the scheduled sync. Standings tiebreaker: on
+// equal points, the lower combined rank of a member's five ranks higher.
+model TeamSos {
+  id         Int      @id @default(autoincrement())
+  seasonYear Int
+  teamId     Int
+  sosRank    Int
+  updatedAt  DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id])
+
+  @@unique([seasonYear, teamId])
 }
 
 model WeeklyScore {

@@ -8,17 +8,19 @@ import { DraftTab } from '../components/DraftTab';
 import { MyTeamTab } from '../components/MyTeamTab';
 import { LeaderboardTab } from '../components/LeaderboardTab';
 import { WeekByWeekTab } from '../components/WeekByWeekTab';
+import { SwapTab } from '../components/SwapTab';
 import { SettingsTab } from '../components/SettingsTab';
 
-type Tab = 'leaderboard' | 'myteam' | 'weeks' | 'league' | 'draft' | 'settings';
+type Tab = 'leaderboard' | 'myteam' | 'weeks' | 'league' | 'draft' | 'swap' | 'settings';
 
+// Settings isn't in the strip: the header's Settings button opens it
 const TABS: { id: Tab; label: string }[] = [
   { id: 'leaderboard', label: 'Leaderboard' },
   { id: 'myteam', label: 'My Team' },
   { id: 'weeks', label: 'Week by Week' },
   { id: 'league', label: 'League' },
   { id: 'draft', label: 'Draft' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'swap', label: 'Week 6 Swap' },
 ];
 
 export function MainApp() {
@@ -58,6 +60,8 @@ export function MainApp() {
         tabRef={(id, el) => {
           tabRefs.current[id] = el;
         }}
+        onSettings={() => setActiveTab('settings')}
+        settingsActive={activeTab === 'settings'}
       />
 
       {/* Tab Content */}
@@ -67,6 +71,7 @@ export function MainApp() {
         {activeTab === 'weeks' && <WeekByWeekTab leagueId={leagueIdNum} />}
         {activeTab === 'league' && <LeagueTab leagueId={leagueIdNum} />}
         {activeTab === 'draft' && <DraftTab leagueId={leagueIdNum} />}
+        {activeTab === 'swap' && <SwapTab leagueId={leagueIdNum} />}
         {activeTab === 'settings' && <SettingsTab leagueId={leagueIdNum} />}
       </main>
     </div>

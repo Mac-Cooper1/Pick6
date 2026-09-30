@@ -1,347 +1,502 @@
 /**
- * Week-5 Swap Service (WS8)
+ * Week-6 Swap Service
  *
- * League rule: after week 5, every member gets exactly one same-slot swap,
- * worst record first. Implementation:
- *  - The window auto-opens during the scheduled sync once the current week
- *    passes 5 (i.e. week 5's games are behind us).
- *  - Turn order = ascending points through week 5 (ties: earlier join).
- *  - Each turn has a 24h clock; expiry marks the member skipped and moves
- *    on (lazy tick — evaluated whenever swap state is read, plus on every
- *    scheduled sync). After the last turn the window goes free-for-all for
- *    anyone who hasn't swapped, until the commissioner closes it.
- *  - Roster effect is effective-week: the old team keeps every week it
- *    already played; the new team counts from the swap-effective week on.
+ * League rule: every member gets at most one same-slot swap, and the whole
+ * league's swaps run at once at the start of week 6. This replaced the WS8
+ * week-5 window on Sep 30, 2026: its 24h turns could straddle a team's game
+ * (whose points? can you still drop it?), took days in a big league, and
+ * let the best records pick up whatever a worse record had just dropped.
+ *
+ *  - Lists open in week 5: each member saves a private priority list of
+ *    "drop X, add Y" lines (same slot, Y unowned). Editing stops when week 6
+ *    starts on ESPN's calendar (Monday 3am ET), before any week-6 game.
+ *  - The first scheduled sync of week 6 finalizes and rescores week 5, then
+ *    runs every drafted league once in reverse standings through week 5
+ *    (standingsService: ties broken by combined SOS rank), and each member
+ *    gets the highest line on their list that is still possible.
+ *  - Only teams nobody owned when lists locked can be added, so a team
+ *    dropped in the run is out of play: nobody later in the order (a better
+ *    record) can pick it up.
+ *  - Roster effect is effective-week: the old team keeps weeks 1-5, the new
+ *    team counts from week 6. A line whose team already kicked off in week 6
+ *    misses (only possible if the run happens late).
  */
 
 import prisma from '../lib/prisma';
-import { ConferenceSlot, SwapStatus, GameStatus } from '@prisma/client';
-import { SLOT_LABELS } from './draftService';
-import { getCurrentWeek } from './seasonService';
+import { ConferenceSlot, GameStatus, SwapClaim, SwapClaimStatus, Team } from '@prisma/client';
+import { DRAFT_SLOTS, SLOT_LABELS } from './draftService';
+import { getAvailableTeams } from './rosterService';
+import { syncSeasonCalendar } from './seasonService';
+import { gamesForTeamWeek, loadScoringWeekMap, seasonRecord } from './scoringWeekService';
+import { getStandings } from './standingsService';
 
-export const SWAP_OPEN_AFTER_WEEK = 5;
-const SWAP_TURN_HOURS = 24;
+export const SWAP_WEEK = 6; // new teams count from here; lists run at its start
+export const SWAP_MAX_CLAIMS = 10;
+
+export type SwapPhase = 'upcoming' | 'open' | 'locked' | 'complete';
+
+export interface SwapLine {
+  dropTeamId: number;
+  addTeamId: number;
+}
+
+interface SwapClaimView {
+  priority: number;
+  slot: ConferenceSlot;
+  slotLabel: string;
+  dropTeamId: number;
+  dropTeamName: string;
+  addTeamId: number;
+  addTeamName: string;
+  status: SwapClaimStatus;
+  note: string | null;
+}
 
 interface SwapOrderEntry {
+  position: number;
   userId: number;
   userName: string;
-  swapOrder: number | null;
+  points: number; // through week 5: the standings that set the order
+  sosTotal: number; // the tiebreaker on equal points (lower = ranks higher)
   swapUsed: boolean;
-  swapSkipped: boolean;
+  swap: { slotLabel: string; dropTeamName: string; addTeamName: string } | null;
 }
 
 export interface SwapState {
-  status: SwapStatus;
-  turnDeadline: Date | null;
-  onTheClockUserId: number | null;
-  freePhase: boolean; // everyone had a turn; unswapped members may still swap
+  swapWeek: number;
+  phase: SwapPhase;
+  opensAt: Date;
+  locksAt: Date;
+  ranAt: Date | null;
+  maxClaims: number;
+  swapUsed: boolean;
+  // Projected from current standings until the run, then the run's order
   order: SwapOrderEntry[];
+  // The viewer's own list; nobody else's is ever returned
+  myClaims: SwapClaimView[];
 }
 
-function resolveOnTheClock(
-  members: { userId: number; swapOrder: number | null; swapUsed: boolean; swapSkipped: boolean }[]
-): number | null {
-  const ordered = members
-    .filter((m) => m.swapOrder !== null)
-    .sort((a, b) => (a.swapOrder || 0) - (b.swapOrder || 0));
-  const next = ordered.find((m) => !m.swapUsed && !m.swapSkipped);
-  return next ? next.userId : null;
+export interface SwapRunResult {
+  leagueId: number;
+  members: number;
+  swaps: number;
+  error?: string; // the run rolled back; the next sync retries it
+}
+
+export interface SwapTeam {
+  teamId: number;
+  name: string;
+  conference: string;
+  slot: ConferenceSlot;
+  slotLabel: string;
+  points: number; // Pick 6 points this season, whoever owned the team
+  wins: number;
+  losses: number;
 }
 
 /**
- * Open the swap window: assign worst-first order and start the first clock
+ * Lists open when week 5 starts and lock when week 6 starts (ESPN calendar)
  */
-export async function openSwapWindow(leagueId: number): Promise<SwapState> {
-  const league = await prisma.league.findUnique({
-    where: { id: leagueId },
-    include: { members: true },
-  });
-
-  if (!league) throw new Error('League not found');
-  if (!league.draftComplete) throw new Error('Draft must be complete before the swap window opens');
-  if (league.swapStatus !== SwapStatus.NOT_OPEN) {
-    throw new Error('Swap window has already been opened');
-  }
-
-  // Standings through week 5 decide the order (worst first)
-  const scores = await prisma.weeklyScore.groupBy({
-    by: ['userId'],
-    where: { leagueId, weekNumber: { lte: SWAP_OPEN_AFTER_WEEK } },
-    _sum: { points: true },
-  });
-  const pointsByUser = new Map(scores.map((s) => [s.userId, s._sum.points || 0]));
-
-  const ordered = [...league.members].sort((a, b) => {
-    const diff = (pointsByUser.get(a.userId) || 0) - (pointsByUser.get(b.userId) || 0);
-    if (diff !== 0) return diff;
-    return a.joinedAt.getTime() - b.joinedAt.getTime();
-  });
-
-  await prisma.$transaction(async (tx) => {
-    for (let i = 0; i < ordered.length; i++) {
-      await tx.leagueMember.update({
-        where: { id: ordered[i].id },
-        data: { swapOrder: i + 1, swapSkipped: false },
-      });
-    }
-    await tx.league.update({
-      where: { id: leagueId },
-      data: {
-        swapStatus: SwapStatus.OPEN,
-        swapTurnDeadline: new Date(Date.now() + SWAP_TURN_HOURS * 3600 * 1000),
-      },
+export async function getSwapSchedule(seasonYear: number) {
+  const find = () =>
+    prisma.seasonWeek.findMany({
+      where: { seasonYear, weekNumber: { in: [SWAP_WEEK - 1, SWAP_WEEK] } },
     });
-  });
 
-  console.log(`[Swap] Window opened for league ${leagueId} (${ordered.length} turns)`);
-  return getSwapState(leagueId);
-}
-
-export async function closeSwapWindow(leagueId: number): Promise<SwapState> {
-  await prisma.league.update({
-    where: { id: leagueId },
-    data: { swapStatus: SwapStatus.CLOSED, swapTurnDeadline: null },
-  });
-  console.log(`[Swap] Window closed for league ${leagueId}`);
-  return getSwapState(leagueId);
-}
-
-/**
- * Current swap state with lazy turn-expiry handling: any expired turns are
- * marked skipped and the clock moves to the next member.
- */
-export async function getSwapState(leagueId: number): Promise<SwapState> {
-  const league = await prisma.league.findUnique({
-    where: { id: leagueId },
-    include: { members: { include: { user: true } } },
-  });
-  if (!league) throw new Error('League not found');
-
-  let turnDeadline = league.swapTurnDeadline;
-  const members = league.members.map((m) => ({
-    id: m.id,
-    userId: m.userId,
-    userName: m.user.name,
-    swapOrder: m.swapOrder,
-    swapUsed: m.swapUsed,
-    swapSkipped: m.swapSkipped,
-  }));
-
-  if (league.swapStatus === SwapStatus.OPEN) {
-    // Expire overdue turns (possibly several, if nobody looked for days)
-    let deadlineChanged = false;
-    while (turnDeadline && new Date() > turnDeadline) {
-      const onClock = resolveOnTheClock(members);
-      if (!onClock) {
-        turnDeadline = null;
-        deadlineChanged = true;
-        break;
-      }
-      const member = members.find((m) => m.userId === onClock)!;
-      member.swapSkipped = true;
-      await prisma.leagueMember.update({
-        where: { id: member.id },
-        data: { swapSkipped: true },
-      });
-      console.log(`[Swap] League ${leagueId}: ${member.userName}'s turn expired`);
-
-      const next = resolveOnTheClock(members);
-      turnDeadline = next ? new Date(Date.now() + SWAP_TURN_HOURS * 3600 * 1000) : null;
-      deadlineChanged = true;
-    }
-
-    if (deadlineChanged) {
-      await prisma.league.update({
-        where: { id: leagueId },
-        data: { swapTurnDeadline: turnDeadline },
-      });
-    }
+  let weeks = await find();
+  if (weeks.length < 2) {
+    await syncSeasonCalendar(seasonYear);
+    weeks = await find();
   }
 
-  const onTheClockUserId =
-    league.swapStatus === SwapStatus.OPEN ? resolveOnTheClock(members) : null;
+  const opens = weeks.find((w) => w.weekNumber === SWAP_WEEK - 1);
+  const locks = weeks.find((w) => w.weekNumber === SWAP_WEEK);
+  if (!opens || !locks) {
+    throw new Error(`No week ${SWAP_WEEK - 1}-${SWAP_WEEK} calendar for ${seasonYear}`);
+  }
+  return { opensAt: opens.startDate, locksAt: locks.startDate };
+}
 
+function phaseFor(
+  league: { draftComplete: boolean; swapRanAt: Date | null },
+  schedule: { opensAt: Date; locksAt: Date },
+  now: Date
+): SwapPhase {
+  if (league.swapRanAt) return 'complete';
+  if (!league.draftComplete || now < schedule.opensAt) return 'upcoming';
+  return now < schedule.locksAt ? 'open' : 'locked';
+}
+
+function toClaimView(claim: SwapClaim & { dropTeam: Team; addTeam: Team }): SwapClaimView {
   return {
-    status: league.swapStatus,
-    turnDeadline,
-    onTheClockUserId,
-    freePhase: league.swapStatus === SwapStatus.OPEN && onTheClockUserId === null,
-    order: members
-      .filter((m) => m.swapOrder !== null)
-      .sort((a, b) => (a.swapOrder || 0) - (b.swapOrder || 0))
-      .map(({ id, ...rest }) => rest),
+    priority: claim.priority,
+    slot: claim.addTeam.slot,
+    slotLabel: SLOT_LABELS[claim.addTeam.slot],
+    dropTeamId: claim.dropTeamId,
+    dropTeamName: claim.dropTeam.name,
+    addTeamId: claim.addTeamId,
+    addTeamName: claim.addTeam.name,
+    status: claim.status,
+    note: claim.note,
   };
 }
 
 /**
- * Perform a member's one swap: same slot, unrostered target, effective from
- * the right week so history is never rewritten.
+ * The viewer's swap state: phase, schedule, order, own list, and each
+ * member's swap once the run is done
  */
-export async function performSwap(
+export async function getSwapState(
   leagueId: number,
   userId: number,
-  dropTeamId: number,
-  addTeamId: number
-) {
+  now: Date = new Date()
+): Promise<SwapState> {
   const league = await prisma.league.findUnique({ where: { id: leagueId } });
   if (!league) throw new Error('League not found');
-  if (league.swapStatus !== SwapStatus.OPEN) throw new Error('Swap window is not open');
+
+  const schedule = await getSwapSchedule(league.seasonYear);
+  const phase = phaseFor(league, schedule, now);
+
+  const [standings, claims] = await Promise.all([
+    // Reverse standings: worst first
+    getStandings(leagueId, { throughWeek: SWAP_WEEK - 1 }).then((rows) => rows.reverse()),
+    // Lists stay private: only the viewer's lines, plus every member's
+    // winning line once the run is done
+    prisma.swapClaim.findMany({
+      where: {
+        leagueId,
+        OR: [
+          { userId },
+          ...(phase === 'complete' ? [{ status: SwapClaimStatus.SWAPPED }] : []),
+        ],
+      },
+      include: { dropTeam: true, addTeam: true },
+      orderBy: { priority: 'asc' },
+    }),
+  ]);
+
+  const ordered =
+    phase === 'complete'
+      ? [...standings].sort(
+          (a, b) => (a.member.swapOrder ?? Infinity) - (b.member.swapOrder ?? Infinity)
+        )
+      : standings;
+  const swappedByUser = new Map(
+    claims.filter((c) => c.status === SwapClaimStatus.SWAPPED).map((c) => [c.userId, c])
+  );
+
+  return {
+    swapWeek: SWAP_WEEK,
+    phase,
+    opensAt: schedule.opensAt,
+    locksAt: schedule.locksAt,
+    ranAt: league.swapRanAt,
+    maxClaims: SWAP_MAX_CLAIMS,
+    swapUsed: standings.some((s) => s.member.userId === userId && s.member.swapUsed),
+    order: ordered.map(({ member, points, sosTotal }, index) => {
+      const swapped = swappedByUser.get(member.userId);
+      return {
+        position: index + 1,
+        userId: member.userId,
+        userName: member.user.name,
+        points,
+        sosTotal,
+        swapUsed: member.swapUsed,
+        swap: swapped
+          ? {
+              slotLabel: SLOT_LABELS[swapped.addTeam.slot],
+              dropTeamName: swapped.dropTeam.name,
+              addTeamName: swapped.addTeam.name,
+            }
+          : null,
+      };
+    }),
+    myClaims: claims.filter((c) => c.userId === userId).map(toClaimView),
+  };
+}
+
+/**
+ * The swap page's board: every unowned draft-pool team, most Pick 6 points
+ * this season first, plus the viewer's own five (slot order) to compare
+ */
+export async function getSwapTeams(
+  leagueId: number,
+  userId: number
+): Promise<{ available: SwapTeam[]; mine: SwapTeam[] }> {
+  const league = await prisma.league.findUnique({ where: { id: leagueId } });
+  if (!league) throw new Error('League not found');
+
+  const [available, myRows] = await Promise.all([
+    getAvailableTeams(leagueId),
+    prisma.rosterSlot.findMany({
+      where: { leagueId, userId, toWeek: null },
+      include: { team: true },
+    }),
+  ]);
+  const mine = myRows
+    .map((r) => r.team)
+    .sort((a, b) => DRAFT_SLOTS.indexOf(a.slot) - DRAFT_SLOTS.indexOf(b.slot));
+
+  const scoringWeeks = await loadScoringWeekMap(
+    league.seasonYear,
+    [...available, ...mine].map((t) => t.id)
+  );
+  const toSwapTeam = (team: Team): SwapTeam => ({
+    teamId: team.id,
+    name: team.name,
+    conference: team.conference,
+    slot: team.slot,
+    slotLabel: SLOT_LABELS[team.slot],
+    ...seasonRecord(scoringWeeks, team.id),
+  });
+
+  return {
+    available: available
+      .map(toSwapTeam)
+      .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name)),
+    mine: mine.map(toSwapTeam),
+  };
+}
+
+/**
+ * Replace a member's list (index 0 = first choice) while lists are open
+ */
+export async function saveSwapClaims(
+  leagueId: number,
+  userId: number,
+  lines: SwapLine[],
+  now: Date = new Date()
+): Promise<SwapState> {
+  const league = await prisma.league.findUnique({ where: { id: leagueId } });
+  if (!league) throw new Error('League not found');
+
+  const phase = phaseFor(league, await getSwapSchedule(league.seasonYear), now);
+  if (phase === 'upcoming') {
+    throw new Error(`Swap lists open when week ${SWAP_WEEK - 1} starts`);
+  }
+  if (phase !== 'open') throw new Error('Swap lists are locked');
 
   const member = await prisma.leagueMember.findUnique({
     where: { leagueId_userId: { leagueId, userId } },
   });
   if (!member) throw new Error('Not a member of this league');
   if (member.swapUsed) throw new Error('You have already used your swap');
-
-  const state = await getSwapState(leagueId); // also ticks expired turns
-  if (state.onTheClockUserId !== null && state.onTheClockUserId !== userId) {
-    throw new Error('Not your turn to swap');
+  if (lines.length > SWAP_MAX_CLAIMS) {
+    throw new Error(`Your list can hold up to ${SWAP_MAX_CLAIMS} swaps`);
   }
 
-  const oldRow = await prisma.rosterSlot.findFirst({
-    where: { leagueId, userId, teamId: dropTeamId, toWeek: null },
-  });
-  if (!oldRow) throw new Error('You do not own that team');
+  const [myRows, rostered, addTeams] = await Promise.all([
+    prisma.rosterSlot.findMany({ where: { leagueId, userId, toWeek: null } }),
+    prisma.rosterSlot.findMany({ where: { leagueId, toWeek: null }, select: { teamId: true } }),
+    prisma.team.findMany({ where: { id: { in: lines.map((l) => l.addTeamId) } } }),
+  ]);
+  const owned = new Set(rostered.map((r) => r.teamId));
+  const teamById = new Map(addTeams.map((t) => [t.id, t]));
+  const listed = new Set<number>();
 
-  const addTeam = await prisma.team.findUnique({ where: { id: addTeamId } });
-  if (!addTeam) throw new Error('Team not found');
-  if (addTeam.slot === ConferenceSlot.NONE) throw new Error(`${addTeam.name} is not in the draft pool`);
-  if (addTeam.slot !== oldRow.slot) {
-    throw new Error(`Swap must stay in the ${SLOT_LABELS[oldRow.slot]} slot`);
-  }
+  for (const line of lines) {
+    const dropRow = myRows.find((r) => r.teamId === line.dropTeamId);
+    if (!dropRow) throw new Error('You can only drop a team on your roster');
 
-  const taken = await prisma.rosterSlot.findFirst({
-    where: { leagueId, teamId: addTeamId, toWeek: null },
-  });
-  if (taken) throw new Error(`${addTeam.name} is already on a roster`);
-
-  // Effective week: never before week 6; if either team's game this week has
-  // already started/finished, push to next week (no swapping in a team that
-  // already won, or dodging a loss that already happened)
-  const currentWeek = await getCurrentWeek(league.seasonYear);
-  let effectiveFrom = Math.max(SWAP_OPEN_AFTER_WEEK + 1, currentWeek);
-
-  if (effectiveFrom === currentWeek) {
-    const startedGame = await prisma.game.findFirst({
-      where: {
-        seasonYear: league.seasonYear,
-        weekNumber: currentWeek,
-        status: { in: [GameStatus.IN_PROGRESS, GameStatus.FINAL] },
-        OR: [
-          { homeTeamId: { in: [addTeamId, dropTeamId] } },
-          { awayTeamId: { in: [addTeamId, dropTeamId] } },
-        ],
-      },
-    });
-    if (startedGame) {
-      effectiveFrom = currentWeek + 1;
+    const add = teamById.get(line.addTeamId);
+    if (!add) throw new Error('Team not found');
+    if (add.slot === ConferenceSlot.NONE) throw new Error(`${add.name} is not in the draft pool`);
+    if (add.slot !== dropRow.slot) {
+      throw new Error(`Swaps stay in one slot: ${add.name} can't replace your ${SLOT_LABELS[dropRow.slot]} team`);
     }
-  }
-
-  if (oldRow.fromWeek > effectiveFrom - 1) {
-    throw new Error('Swap timing conflict — contact your commissioner');
+    if (owned.has(add.id)) throw new Error(`${add.name} is already on a roster`);
+    if (listed.has(add.id)) throw new Error(`${add.name} is on your list twice`);
+    listed.add(add.id);
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.rosterSlot.update({
-      where: { id: oldRow.id },
-      data: { toWeek: effectiveFrom - 1 },
-    });
-    await tx.rosterSlot.create({
-      data: {
-        leagueId,
-        userId,
-        slot: oldRow.slot,
-        teamId: addTeamId,
-        fromWeek: effectiveFrom,
-      },
-    });
-    await tx.leagueMember.update({
-      where: { id: member.id },
-      data: { swapUsed: true },
-    });
+    await tx.swapClaim.deleteMany({ where: { leagueId, userId } });
+    if (lines.length > 0) {
+      await tx.swapClaim.createMany({
+        data: lines.map((line, index) => ({
+          leagueId,
+          userId,
+          priority: index + 1,
+          dropTeamId: line.dropTeamId,
+          addTeamId: line.addTeamId,
+        })),
+      });
+    }
   });
 
-  // Move the clock along
-  const after = await getSwapState(leagueId);
-  await prisma.league.update({
-    where: { id: leagueId },
-    data: {
-      swapTurnDeadline:
-        after.onTheClockUserId !== null
-          ? new Date(Date.now() + SWAP_TURN_HOURS * 3600 * 1000)
-          : null,
-    },
-  });
-
-  console.log(
-    `[Swap] League ${leagueId}: user ${userId} swapped team ${dropTeamId} → ${addTeamId} (${SLOT_LABELS[oldRow.slot]}, effective week ${effectiveFrom})`
-  );
-
-  return {
-    droppedTeamId: dropTeamId,
-    addedTeamId: addTeamId,
-    slot: oldRow.slot,
-    effectiveFromWeek: effectiveFrom,
-  };
+  return getSwapState(leagueId, userId, now);
 }
 
 /**
- * Pass on your turn (forfeits nothing until the window closes — you can
- * still swap in the free-for-all phase, but the clock moves on)
+ * Run a league's swap once lists have locked. Returns null when it isn't
+ * due (lists still open, draft unfinished) or has already run.
  */
-export async function passSwap(leagueId: number, userId: number): Promise<SwapState> {
+export async function runSwap(
+  leagueId: number,
+  now: Date = new Date()
+): Promise<SwapRunResult | null> {
   const league = await prisma.league.findUnique({ where: { id: leagueId } });
   if (!league) throw new Error('League not found');
-  if (league.swapStatus !== SwapStatus.OPEN) throw new Error('Swap window is not open');
 
-  const state = await getSwapState(leagueId);
-  if (state.onTheClockUserId !== userId) {
-    throw new Error('You are not on the clock');
-  }
+  const schedule = await getSwapSchedule(league.seasonYear);
+  if (phaseFor(league, schedule, now) !== 'locked') return null;
 
-  const member = await prisma.leagueMember.findUnique({
-    where: { leagueId_userId: { leagueId, userId } },
-  });
-  await prisma.leagueMember.update({
-    where: { id: member!.id },
-    data: { swapSkipped: true },
+  const claims = await prisma.swapClaim.findMany({
+    where: { leagueId },
+    include: { dropTeam: true, addTeam: true },
+    orderBy: { priority: 'asc' },
   });
 
-  const after = await getSwapState(leagueId);
-  await prisma.league.update({
-    where: { id: leagueId },
-    data: {
-      swapTurnDeadline:
-        after.onTheClockUserId !== null
-          ? new Date(Date.now() + SWAP_TURN_HOURS * 3600 * 1000)
-          : null,
+  // Safety net for a late run: a team whose week-6 game has kicked off
+  // stays put (no picking up a team that already won, no dodging a loss)
+  const scoringWeeks = await loadScoringWeekMap(
+    league.seasonYear,
+    claims.flatMap((c) => [c.dropTeamId, c.addTeamId])
+  );
+  const kickedOff = (teamId: number) =>
+    gamesForTeamWeek(scoringWeeks, teamId, SWAP_WEEK).some(
+      (g) =>
+        g.status === GameStatus.IN_PROGRESS ||
+        g.status === GameStatus.FINAL ||
+        (g.status === GameStatus.SCHEDULED && g.startTime <= now)
+    );
+
+  return prisma.$transaction(
+    async (tx) => {
+      // Take the run first: a concurrent sync blocks on this row, then sees
+      // swapRanAt set and backs off, so a league can never run twice
+      const taken = await tx.league.updateMany({
+        where: { id: leagueId, swapRanAt: null },
+        data: { swapRanAt: now },
+      });
+      if (taken.count === 0) return null;
+
+      // Reverse standings through week 5 (ties: combined SOS rank)
+      const standings = (
+        await getStandings(leagueId, { throughWeek: SWAP_WEEK - 1, db: tx })
+      ).reverse();
+      const rosterRows = await tx.rosterSlot.findMany({ where: { leagueId, toWeek: null } });
+
+      // Everything owned at lock is off the board, which also keeps every
+      // team dropped in this run out of play for the rest of the order
+      const ownedAtLock = new Set(rosterRows.map((r) => r.teamId));
+      const droppedThisRun = new Set<number>();
+      const addedBy = new Map<number, string>();
+      let swaps = 0;
+
+      for (const [index, { member }] of standings.entries()) {
+        await tx.leagueMember.update({
+          where: { id: member.id },
+          data: { swapOrder: index + 1 },
+        });
+
+        // swapUsed can already be true from the retired turn-based window
+        let swapped = member.swapUsed;
+        for (const claim of claims.filter((c) => c.userId === member.userId)) {
+          if (swapped) break;
+
+          const dropRow = rosterRows.find(
+            (r) => r.userId === member.userId && r.teamId === claim.dropTeamId
+          );
+          const { dropTeam, addTeam } = claim;
+          const note = !dropRow
+            ? `${dropTeam.name} is no longer on your roster`
+            : addTeam.slot !== dropRow.slot
+            ? `${addTeam.name} is not a ${SLOT_LABELS[dropRow.slot]} team`
+            : addedBy.has(addTeam.id)
+            ? `${addedBy.get(addTeam.id)} took ${addTeam.name} earlier in the order`
+            : droppedThisRun.has(addTeam.id)
+            ? `${addTeam.name} was dropped in the swap, and dropped teams can't be picked up`
+            : ownedAtLock.has(addTeam.id)
+            ? `${addTeam.name} was on a roster when lists locked`
+            : kickedOff(dropTeam.id)
+            ? `${dropTeam.name} already played in week ${SWAP_WEEK}`
+            : kickedOff(addTeam.id)
+            ? `${addTeam.name} already played in week ${SWAP_WEEK}`
+            : dropRow.fromWeek >= SWAP_WEEK
+            ? `${dropTeam.name} only joined your roster in week ${dropRow.fromWeek}`
+            : null;
+
+          if (note || !dropRow) {
+            await tx.swapClaim.update({
+              where: { id: claim.id },
+              data: { status: SwapClaimStatus.MISSED, note },
+            });
+            continue;
+          }
+
+          await tx.rosterSlot.update({
+            where: { id: dropRow.id },
+            data: { toWeek: SWAP_WEEK - 1 },
+          });
+          await tx.rosterSlot.create({
+            data: {
+              leagueId,
+              userId: member.userId,
+              slot: dropRow.slot,
+              teamId: addTeam.id,
+              fromWeek: SWAP_WEEK,
+            },
+          });
+          await tx.leagueMember.update({
+            where: { id: member.id },
+            data: { swapUsed: true },
+          });
+          await tx.swapClaim.update({
+            where: { id: claim.id },
+            data: { status: SwapClaimStatus.SWAPPED },
+          });
+
+          droppedThisRun.add(dropTeam.id);
+          addedBy.set(addTeam.id, member.user.name);
+          swapped = true;
+          swaps++;
+          console.log(
+            `[Swap] League ${leagueId}: #${index + 1} ${member.user.name} ${dropTeam.name} → ${addTeam.name} (${SLOT_LABELS[dropRow.slot]}, from week ${SWAP_WEEK})`
+          );
+        }
+
+        // Lines below the one that went through
+        await tx.swapClaim.updateMany({
+          where: { leagueId, userId: member.userId, status: SwapClaimStatus.PENDING },
+          data: { status: SwapClaimStatus.UNUSED },
+        });
+      }
+
+      console.log(
+        `[Swap] League ${leagueId}: week ${SWAP_WEEK} swap ran, ${swaps} swaps across ${standings.length} members`
+      );
+      return { leagueId, members: standings.length, swaps };
     },
-  });
-
-  return getSwapState(leagueId);
+    { timeout: 60000 }
+  );
 }
 
 /**
- * Auto-open swap windows once week 5 is behind us — called from the
- * scheduled sync so no one has to remember.
+ * Run every drafted league whose lists have locked and hasn't run yet.
+ * Called from the scheduled sync after it finalizes and rescores week 5,
+ * so the order comes from final standings. Safe to call on every sync.
  */
-export async function autoOpenSwapWindows(seasonYear: number, currentWeek: number) {
-  if (currentWeek <= SWAP_OPEN_AFTER_WEEK) return;
+export async function runDueSwaps(
+  seasonYear: number,
+  now: Date = new Date()
+): Promise<SwapRunResult[]> {
+  const { locksAt } = await getSwapSchedule(seasonYear);
+  if (now < locksAt) return [];
 
   const leagues = await prisma.league.findMany({
-    where: {
-      seasonYear,
-      draftComplete: true,
-      swapStatus: SwapStatus.NOT_OPEN,
-    },
+    where: { seasonYear, draftComplete: true, swapRanAt: null },
+    select: { id: true },
   });
 
-  for (const league of leagues) {
+  const results: SwapRunResult[] = [];
+  for (const { id } of leagues) {
     try {
-      await openSwapWindow(league.id);
+      const result = await runSwap(id, now);
+      if (result) results.push(result);
     } catch (e: any) {
-      console.error(`[Swap] Auto-open failed for league ${league.id}: ${e.message}`);
+      console.error(`[Swap] Run failed for league ${id}: ${e.message}`);
+      results.push({ leagueId: id, members: 0, swaps: 0, error: e.message });
     }
   }
+  return results;
 }

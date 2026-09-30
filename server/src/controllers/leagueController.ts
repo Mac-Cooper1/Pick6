@@ -4,6 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import { generateJoinCode, validateJoinCode } from '../utils/joinCode';
 import { getCurrentWeek } from '../services/seasonService';
 import { assignDraftOrder, getDraftState } from '../services/draftService';
+import { getStandings } from '../services/standingsService';
 import { getIOInstance } from '../socket/draftSocket';
 import prisma from '../lib/prisma';
 import { MemberRole, DraftStatus } from '@prisma/client';
@@ -141,7 +142,7 @@ export async function joinLeague(req: AuthRequest, res: Response, next: any) {
     }
 
     // The membership locks the moment the draft starts: rosters, snake-order
-    // math, standings, and the week-5 swap order all assume a fixed member
+    // math, standings, and the week-6 swap order all assume a fixed member
     // set from that point on. draftStarted stays true through LIVE, PAUSED,
     // and COMPLETE.
     if (league.draftStarted) {
@@ -342,15 +343,9 @@ export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
         // Calculate user's record (wins/losses based on weekly standings)
         const totalPoints = league.weeklyScores.reduce((sum, score) => sum + score.points, 0);
 
-        // Get user's rank in the league
-        const allScores = await prisma.weeklyScore.groupBy({
-          by: ['userId'],
-          where: { leagueId: league.id },
-          _sum: { points: true },
-          orderBy: { _sum: { points: 'desc' } },
-        });
-
-        const userRank = allScores.findIndex((s) => s.userId === userId) + 1;
+        // User's rank in the league (points, then the SOS tiebreaker)
+        const standings = await getStandings(league.id);
+        const userRank = standings.findIndex((s) => s.member.userId === userId) + 1;
 
         return {
           id: league.id,
@@ -367,7 +362,7 @@ export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
           userStats: {
             totalPoints,
             rank: userRank || null,
-            totalMembers: allScores.length,
+            totalMembers: standings.length,
           },
           members: league.members.map((m) => ({
             id: m.user.id,

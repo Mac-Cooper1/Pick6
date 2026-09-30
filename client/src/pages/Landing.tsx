@@ -52,7 +52,7 @@ const SLOTS = [
 const DATES = [
   { date: 'Aug 27', label: 'Kickoff' },
   { date: 'Sep 5', label: 'Drafts close' },
-  { date: 'Oct 4', label: 'Swap window opens' },
+  { date: 'Oct 5', label: 'Week 6 swap runs' },
   { date: 'Dec 12', label: 'Final week' },
 ];
 
@@ -217,18 +217,18 @@ export function Landing() {
         </div>
       </section>
 
-      {/* Week 5 swap: statement band */}
+      {/* Week 6 swap: statement band */}
       <section className="bg-green-900 text-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
           <div className="flex items-start gap-4 sm:gap-6">
             <Mark className="w-12 h-12 sm:w-16 sm:h-16 shrink-0" inverted />
             <div>
               <h2 className="font-display font-extrabold uppercase leading-[0.95] tracking-tight text-4xl sm:text-5xl lg:text-6xl">
-                One swap after week 5.
+                One swap before week 6.
               </h2>
               <p className="mt-4 text-lg text-white/80 max-w-[50ch] leading-relaxed">
-                Drafted a dud? Everyone gets a single same-slot swap, worst record picks first. Past
-                weeks stay scored as they were.
+                Drafted a dud? Rank your same-slot swaps during week 5. They all run at once when
+                week 6 starts, worst record first. Past weeks stay scored as they were.
               </p>
             </div>
           </div>

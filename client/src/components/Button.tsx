@@ -3,7 +3,7 @@ import React, { ButtonHTMLAttributes } from 'react';
 /**
  * The one button. Every action in the app renders through here so padding,
  * radius, weight, disabled/pressed states and tap-target size stay consistent.
- * Colors are semantic on purpose: amber = week-5 swap, blue = commissioner
+ * Colors are semantic on purpose: amber = week-6 swap, blue = commissioner
  * sync, red = destructive, nav = on the dark green header.
  *
  * Shape system: buttons are rounded-lg (8px), same as inputs; cards are

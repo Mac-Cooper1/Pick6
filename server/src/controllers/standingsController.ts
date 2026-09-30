@@ -4,6 +4,7 @@ import { AppError } from '../middleware/errorHandler';
 import prisma from '../lib/prisma';
 import { getCurrentWeek } from '../services/seasonService';
 import { SLOT_LABELS } from '../services/draftService';
+import { getStandings } from '../services/standingsService';
 import {
   gamesForTeamWeek,
   loadScoringWeekMap,
@@ -53,22 +54,18 @@ export async function getSeasonGrid(req: AuthRequest, res: Response) {
     throw new AppError('League not found', 404);
   }
 
-  const [weeks, scores, members, currentWeek] = await Promise.all([
+  const [weeks, scores, standings, currentWeek] = await Promise.all([
     prisma.seasonWeek.findMany({
       where: { seasonYear: league.seasonYear },
       orderBy: { weekNumber: 'asc' },
       select: { weekNumber: true, label: true, startDate: true, endDate: true },
     }),
     prisma.weeklyScore.findMany({ where: { leagueId } }),
-    prisma.leagueMember.findMany({
-      where: { leagueId },
-      include: { user: true },
-      orderBy: { joinedAt: 'asc' },
-    }),
+    getStandings(leagueId), // points, then the SOS tiebreaker
     getCurrentWeek(league.seasonYear),
   ]);
 
-  const rows = members.map((m) => {
+  const rows = standings.map(({ member: m }) => {
     const byWeek: Record<number, number> = {};
     let total = 0;
     for (const score of scores) {
@@ -79,8 +76,6 @@ export async function getSeasonGrid(req: AuthRequest, res: Response) {
     }
     return { userId: m.userId, userName: m.user.name, byWeek, total };
   });
-
-  rows.sort((a, b) => b.total - a.total);
 
   res.json({
     seasonYear: league.seasonYear,
@@ -310,46 +305,20 @@ export async function getOverallStandings(req: AuthRequest, res: Response) {
       throw new AppError('Not a member of this league', 403);
     }
 
-    // Get all members
-    const members = await prisma.leagueMember.findMany({
-      where: { leagueId },
-      include: {
+    // Points, then the SOS tiebreaker (standingsService)
+    const standings = await getStandings(leagueId);
+
+    res.json(
+      standings.map((s, index) => ({
+        rank: index + 1,
         user: {
-          include: {
-            weeklyScores: {
-              where: { leagueId },
-            },
-          },
+          id: s.member.user.id,
+          name: s.member.user.name,
         },
-      },
-    });
-
-    // Calculate total points for each user
-    const standings = members.map((m) => {
-      const totalPoints = m.user.weeklyScores.reduce(
-        (sum, score) => sum + score.points,
-        0
-      );
-
-      return {
-        user: {
-          id: m.user.id,
-          name: m.user.name,
-        },
-        points: totalPoints,
-      };
-    });
-
-    // Sort by points descending
-    standings.sort((a, b) => b.points - a.points);
-
-    // Add rank
-    const rankedStandings = standings.map((item, index) => ({
-      rank: index + 1,
-      ...item,
-    }));
-
-    res.json(rankedStandings);
+        points: s.points,
+        sosTotal: s.sosTotal,
+      }))
+    );
   } catch (error) {
     throw error;
   }

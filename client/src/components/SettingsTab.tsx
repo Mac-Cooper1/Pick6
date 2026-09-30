@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CaretUp, CaretDown, ShareNetwork } from '@phosphor-icons/react';
-import { leagueApi, adminApi, swapApi, authApi } from '../services/api';
+import { leagueApi, adminApi, authApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
@@ -21,7 +21,7 @@ function toLocalDateString(date: Date): string {
 }
 
 export function SettingsTab({ leagueId }: SettingsTabProps) {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, logout } = useAuth();
   const queryClient = useQueryClient();
 
   // Get league info including commissioner status
@@ -48,34 +48,11 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
-  const [swapMessage, setSwapMessage] = useState<string | null>(null);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   // Your Profile (every member, not just the commissioner)
   const [profileName, setProfileName] = useState(user?.name || '');
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
-
-  // Swap window state + commissioner open/close
-  const { data: swapState } = useQuery({
-    queryKey: ['swapState', leagueId],
-    queryFn: () => swapApi.getState(leagueId),
-  });
-
-  const swapWindowMutation = useMutation({
-    mutationFn: (action: 'open' | 'close') =>
-      action === 'open' ? swapApi.open(leagueId) : swapApi.close(leagueId),
-    onSuccess: (state) => {
-      setSwapMessage(
-        state.status === 'OPEN'
-          ? 'Swap window is open. Turn order is posted in My Team.'
-          : 'Swap window closed.'
-      );
-      queryClient.invalidateQueries({ queryKey: ['swapState', leagueId] });
-    },
-    onError: (err: any) => {
-      setSwapMessage(err.response?.data?.message || 'Swap window change failed');
-    },
-  });
 
   // Manual "sync now" (commissioner) — the scheduled cron does this automatically
   const syncMutation = useMutation({
@@ -306,9 +283,14 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
         )}
       </div>
 
-      {/* Your Profile (every member) */}
+      {/* Your Profile (every member); Log out lives here, the header has Settings */}
       <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
-        <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900 mb-1">Your Profile</h3>
+        <div className="flex items-start justify-between gap-3 mb-1">
+          <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Your Profile</h3>
+          <Button variant="secondary" size="sm" onClick={logout} className="shrink-0">
+            Log out
+          </Button>
+        </div>
         <p className="text-sm text-gray-600 mb-4">
           Signed in as <span className="font-semibold">{user?.email}</span>. Your name shows on the leaderboard and draft board.
         </p>
@@ -393,54 +375,6 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
           >
             {syncMutation.isPending ? 'Syncing...' : `Sync Week ${currentLeague.currentWeek} Now`}
           </Button>
-        </div>
-      )}
-
-      {/* Commissioner: week-5 swap window */}
-      {isCommissioner && (
-        <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
-          <div className="flex items-center gap-3 mb-2">
-            <span className="label text-amber-700">Commissioner</span>
-            <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Week 5 Swap Window</h3>
-          </div>
-          <p className="text-sm text-gray-600 mb-4">
-            Opens automatically once week 5 wraps. Status:{' '}
-            <span className="font-semibold">
-              {swapState?.status === 'OPEN'
-                ? 'OPEN'
-                : swapState?.status === 'CLOSED'
-                ? 'CLOSED'
-                : 'Not opened yet'}
-            </span>
-          </p>
-          {swapMessage && (
-            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
-              {swapMessage}
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {swapState?.status === 'NOT_OPEN' && (
-              <Button
-                variant="amber"
-                onClick={() => swapWindowMutation.mutate('open')}
-                disabled={swapWindowMutation.isPending}
-              >
-                Open swap window now
-              </Button>
-            )}
-            {swapState?.status === 'OPEN' && (
-              <Button
-                variant="secondary"
-                onClick={() => swapWindowMutation.mutate('close')}
-                disabled={swapWindowMutation.isPending}
-              >
-                Close swap window
-              </Button>
-            )}
-            {swapState?.status === 'CLOSED' && (
-              <p className="text-sm text-gray-500">The window is closed for the season.</p>
-            )}
-          </div>
         </div>
       )}
 

@@ -1,15 +1,17 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft } from '@phosphor-icons/react';
+import { ArrowLeft, GearSix } from '@phosphor-icons/react';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from './Button';
 import { Logo } from './Logo';
 
 /**
  * The signed-in header: deep-green band with the logo, the user's name and
- * Logout. Pages can add a back arrow and a tab strip that lives *inside* the
- * band (broadcast-scoreboard style: condensed uppercase labels, gold underline
- * on the active one). The strip scrolls sideways on phones.
+ * either Settings (league pages pass onSettings; Log out lives in Settings)
+ * or Log out (the dashboard, which has no settings page). Pages can add a
+ * back arrow and a tab strip that lives *inside* the band (broadcast-
+ * scoreboard style: condensed uppercase labels, gold underline on the active
+ * one). The strip scrolls sideways on phones.
  */
 
 export interface HeaderTab<T extends string> {
@@ -24,6 +26,8 @@ interface AppHeaderProps<T extends string> {
   activeTab?: T;
   onTabChange?: (id: T) => void;
   tabRef?: (id: T, el: HTMLButtonElement | null) => void;
+  onSettings?: () => void;
+  settingsActive?: boolean;
 }
 
 export function AppHeader<T extends string>({
@@ -33,6 +37,8 @@ export function AppHeader<T extends string>({
   activeTab,
   onTabChange,
   tabRef,
+  onSettings,
+  settingsActive = false,
 }: AppHeaderProps<T>) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -56,9 +62,22 @@ export function AppHeader<T extends string>({
           </div>
           <div className="flex items-center gap-3 sm:gap-4 min-w-0">
             <span className="text-sm text-white/80 truncate min-w-0">{user?.name}</span>
-            <Button variant="nav" size="sm" onClick={logout} className="shrink-0">
-              Log out
-            </Button>
+            {onSettings ? (
+              <Button
+                variant="nav"
+                size="sm"
+                onClick={onSettings}
+                aria-current={settingsActive ? 'page' : undefined}
+                className={`shrink-0 ${settingsActive ? 'ring-2 ring-amber-400' : ''}`}
+              >
+                <GearSix size={16} weight="bold" aria-hidden />
+                Settings
+              </Button>
+            ) : (
+              <Button variant="nav" size="sm" onClick={logout} className="shrink-0">
+                Log out
+              </Button>
+            )}
           </div>
         </div>
 

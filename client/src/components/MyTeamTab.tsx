@@ -2,19 +2,17 @@
  * My Team Tab
  *
  * Your five teams and their games this week: opponent, kickoff, venue, TV
- * network, and the stored spread (the exact line scoring uses). Also home of
- * the week-5 swap flow (moved here from the retired Draft Recap tab):
- * worst-record-first turns, one same-slot swap each.
+ * network, and the stored spread (the exact line scoring uses). The week-6
+ * swap has its own tab (SwapTab).
  */
 
 import React, { useMemo, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
-import { leagueApi, rosterApi, swapApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
+import { leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
-import { Button } from './Button';
-import { DRAFT_SLOTS, SLOT_LABELS, ConferenceSlot, RosterEntry, Team } from '../types';
+import { DRAFT_SLOTS, SLOT_LABELS, ConferenceSlot } from '../types';
 
 interface MyTeamTabProps {
   leagueId: number;
@@ -36,12 +34,6 @@ function formatKickoff(startTime: string): string {
 
 export function MyTeamTab({ leagueId }: MyTeamTabProps) {
   const { user } = useAuth();
-  const queryClient = useQueryClient();
-
-  const [swapDrop, setSwapDrop] = useState<RosterEntry | null>(null);
-  const [swapAddId, setSwapAddId] = useState<number | null>(null);
-  const [swapError, setSwapError] = useState<string | null>(null);
-  const [swapSuccess, setSwapSuccess] = useState<string | null>(null);
 
   const { data: leagues } = useQuery({
     queryKey: ['myLeagues'],
@@ -67,17 +59,6 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
     refetchInterval: 60000,
   });
 
-  const { data: myRoster } = useQuery({
-    queryKey: ['myRoster', leagueId],
-    queryFn: () => rosterApi.getMyRoster(leagueId),
-  });
-
-  const { data: swapState } = useQuery({
-    queryKey: ['swapState', leagueId],
-    queryFn: () => swapApi.getState(leagueId),
-    refetchInterval: 30000,
-  });
-
   // AP ranks, keyed by abbreviation (same source the draft room autopick uses)
   const { data: rankings } = useQuery({
     queryKey: ['rankings'],
@@ -95,62 +76,6 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
 
   const rankFor = (abbreviation: string | null | undefined) =>
     abbreviation ? rankingsMap.get(abbreviation.toUpperCase()) : undefined;
-
-  // Week-5 swap plumbing (moved from the retired Draft Recap tab)
-  const myEntry = swapState?.order.find((o) => o.userId === user?.id);
-  const canSwap =
-    swapState?.status === 'OPEN' &&
-    myEntry !== undefined &&
-    !myEntry.swapUsed &&
-    (swapState.freePhase || swapState.onTheClockUserId === user?.id);
-  const onTheClockMe = swapState?.status === 'OPEN' && swapState.onTheClockUserId === user?.id;
-  const onTheClockName = swapState?.order.find(
-    (o) => o.userId === swapState.onTheClockUserId
-  )?.userName;
-
-  const { data: availableTeams } = useQuery({
-    queryKey: ['availableSwapTeams', leagueId],
-    queryFn: () => rosterApi.getAvailableTeams(leagueId),
-    enabled: !!canSwap,
-  });
-
-  const swapCandidates: Team[] = (availableTeams || []).filter(
-    (t) => swapDrop && t.slot === swapDrop.slot
-  );
-
-  const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['myMatchups', leagueId] });
-    queryClient.invalidateQueries({ queryKey: ['myRoster', leagueId] });
-    queryClient.invalidateQueries({ queryKey: ['allRosters', leagueId] });
-    queryClient.invalidateQueries({ queryKey: ['swapState', leagueId] });
-    queryClient.invalidateQueries({ queryKey: ['availableSwapTeams', leagueId] });
-    queryClient.invalidateQueries({ queryKey: ['leagueMembers', leagueId] });
-    queryClient.invalidateQueries({ queryKey: ['allMatchups', leagueId] });
-  };
-
-  const swapMutation = useMutation({
-    mutationFn: () => swapApi.swap(leagueId, swapDrop!.teamId, swapAddId!),
-    onSuccess: (data: any) => {
-      setSwapSuccess(`Swap complete. Your new team counts from week ${data.effectiveFromWeek} on.`);
-      setSwapError(null);
-      setSwapDrop(null);
-      setSwapAddId(null);
-      invalidateAll();
-    },
-    onError: (err: any) => {
-      setSwapError(err.response?.data?.message || 'Swap failed');
-      setSwapSuccess(null);
-    },
-  });
-
-  const passMutation = useMutation({
-    mutationFn: () => swapApi.pass(leagueId),
-    onSuccess: () => {
-      setSwapSuccess('You passed. You can still swap after everyone has had their turn, until the window closes.');
-      invalidateAll();
-    },
-    onError: (err: any) => setSwapError(err.response?.data?.message || 'Pass failed'),
-  });
 
   if (matchupsLoading) return <Loading inline />;
 
@@ -203,133 +128,6 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
           </div>
         )}
       </div>
-
-      {/* Week-5 swap window (your own view only; the swap is your move) */}
-      {viewingSelf && swapState && swapState.status !== 'NOT_OPEN' && (
-        <div className={`card overflow-hidden ${swapState.status === 'OPEN' ? 'border-amber-300' : ''}`}>
-          <div className={`p-4 ${swapState.status === 'OPEN' ? 'bg-amber-50 border-b border-amber-200' : 'bg-gray-50 border-b border-gray-200'}`}>
-            <div className="flex items-baseline gap-2">
-              <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">
-                Week 5 Swap
-              </h3>
-              <span className={`label ${swapState.status === 'OPEN' ? 'text-amber-700' : 'text-gray-500'}`}>
-                {swapState.status === 'OPEN' ? 'window open' : 'window closed'}
-              </span>
-            </div>
-            {swapState.status === 'OPEN' && (
-              <p className="text-amber-900 text-sm mt-1">
-                One same-slot swap each, worst record first.
-                {swapState.freePhase
-                  ? ' All turns are done. Anyone who has not swapped may swap until the commissioner closes the window.'
-                  : onTheClockMe
-                  ? " It's your turn!"
-                  : ` On the clock: ${onTheClockName ?? 'nobody'}.`}
-                {swapState.turnDeadline && !swapState.freePhase && (
-                  <> Turn ends {new Date(swapState.turnDeadline).toLocaleString()}.</>
-                )}
-              </p>
-            )}
-          </div>
-
-          {/* Order strip */}
-          <div className="px-4 py-3 flex flex-wrap gap-2 border-b border-gray-200">
-            {swapState.order.map((o) => (
-              <span
-                key={o.userId}
-                className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                  o.swapUsed
-                    ? 'bg-green-100 text-green-800'
-                    : o.swapSkipped
-                    ? 'bg-gray-100 text-gray-500 line-through'
-                    : o.userId === swapState.onTheClockUserId
-                    ? 'bg-amber-100 text-amber-800 ring-2 ring-amber-400'
-                    : 'bg-gray-100 text-gray-700'
-                }`}
-                title={o.swapUsed ? 'Swapped' : o.swapSkipped ? 'Passed' : `Turn ${o.swapOrder}`}
-              >
-                {o.swapOrder}. {o.userName}
-                {o.swapUsed && <span className="ml-1 normal-case opacity-70">swapped</span>}
-              </span>
-            ))}
-          </div>
-
-          {swapError && <div className="px-4 pt-3"><ErrorMessage message={swapError} /></div>}
-          {swapSuccess && (
-            <div className="mx-4 mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
-              {swapSuccess}
-            </div>
-          )}
-
-          {/* My swap controls */}
-          {canSwap && (
-            <div className="p-4 space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Drop</label>
-                  <select
-                    value={swapDrop?.teamId ?? ''}
-                    onChange={(e) => {
-                      const entry = myRoster?.find((t) => t.teamId === parseInt(e.target.value));
-                      setSwapDrop(entry ?? null);
-                      setSwapAddId(null);
-                    }}
-                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500"
-                  >
-                    <option value="">Choose a team to drop…</option>
-                    {myRoster?.map((t) => (
-                      <option key={t.teamId} value={t.teamId}>
-                        {t.teamName} ({t.slotLabel})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">
-                    Add {swapDrop ? `(${SLOT_LABELS[swapDrop.slot as ConferenceSlot]} only)` : ''}
-                  </label>
-                  <select
-                    value={swapAddId ?? ''}
-                    onChange={(e) => setSwapAddId(parseInt(e.target.value) || null)}
-                    disabled={!swapDrop}
-                    className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100"
-                  >
-                    <option value="">
-                      {swapDrop ? 'Choose your new team…' : 'Pick a drop first'}
-                    </option>
-                    {swapCandidates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.conference})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button
-                  variant="amber"
-                  onClick={() => swapMutation.mutate()}
-                  disabled={!swapDrop || !swapAddId || swapMutation.isPending}
-                >
-                  {swapMutation.isPending ? 'Swapping…' : 'Confirm Swap (one per season!)'}
-                </Button>
-                {onTheClockMe && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => passMutation.mutate()}
-                    disabled={passMutation.isPending}
-                  >
-                    Pass my turn
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {swapState.status === 'OPEN' && myEntry?.swapUsed && (
-            <p className="px-4 pb-4 text-sm text-gray-500">You've used your swap.</p>
-          )}
-        </div>
-      )}
 
       {/* One card per slot */}
       {!matchups || matchups.length === 0 ? (

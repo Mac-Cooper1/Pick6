@@ -236,19 +236,56 @@ export const standingsApi = {
   },
 };
 
-// Week-5 swap API
+// Week-6 swap API
+export interface SwapLine {
+  dropTeamId: number;
+  addTeamId: number;
+}
+
+export interface SwapClaim extends SwapLine {
+  priority: number;
+  slot: ConferenceSlot;
+  slotLabel: string;
+  dropTeamName: string;
+  addTeamName: string;
+  // PENDING until the run, then how this line went
+  status: 'PENDING' | 'SWAPPED' | 'MISSED' | 'UNUSED';
+  note: string | null;
+}
+
 export interface SwapState {
-  status: 'NOT_OPEN' | 'OPEN' | 'CLOSED';
-  turnDeadline: string | null;
-  onTheClockUserId: number | null;
-  freePhase: boolean;
+  swapWeek: number;
+  // upcoming: before week 5 · open: lists editable (week 5) · locked: week 6
+  // started, waiting for the sync to run it · complete: ran
+  phase: 'upcoming' | 'open' | 'locked' | 'complete';
+  opensAt: string;
+  locksAt: string;
+  ranAt: string | null;
+  maxClaims: number;
+  swapUsed: boolean;
+  // Projected from current standings until the run, then the run's order
   order: Array<{
+    position: number;
     userId: number;
     userName: string;
-    swapOrder: number | null;
+    points: number;
+    sosTotal: number; // tiebreaker: lower combined SOS rank ranks higher
     swapUsed: boolean;
-    swapSkipped: boolean;
+    swap: { slotLabel: string; dropTeamName: string; addTeamName: string } | null;
   }>;
+  myClaims: SwapClaim[];
+}
+
+// A team on the swap page's board: its Pick 6 season, whoever owned it
+export interface SwapTeam {
+  teamId: number;
+  name: string;
+  conference: string;
+  slot: ConferenceSlot;
+  slotLabel: string;
+  points: number;
+  wins: number;
+  losses: number;
 }
 
 export const swapApi = {
@@ -257,23 +294,15 @@ export const swapApi = {
     return data;
   },
 
-  swap: async (leagueId: number, dropTeamId: number, addTeamId: number): Promise<any> => {
-    const { data } = await api.post(`/leagues/${leagueId}/swap`, { dropTeamId, addTeamId });
+  // Unowned teams (most Pick 6 points first) plus your own five
+  getTeams: async (leagueId: number): Promise<{ available: SwapTeam[]; mine: SwapTeam[] }> => {
+    const { data } = await api.get(`/leagues/${leagueId}/swap/teams`);
     return data;
   },
 
-  pass: async (leagueId: number): Promise<SwapState> => {
-    const { data } = await api.post<SwapState>(`/leagues/${leagueId}/swap/pass`);
-    return data;
-  },
-
-  open: async (leagueId: number): Promise<SwapState> => {
-    const { data } = await api.post<SwapState>(`/leagues/${leagueId}/swap/open`);
-    return data;
-  },
-
-  close: async (leagueId: number): Promise<SwapState> => {
-    const { data } = await api.post<SwapState>(`/leagues/${leagueId}/swap/close`);
+  // Replaces your whole list; first line = first choice
+  saveClaims: async (leagueId: number, claims: SwapLine[]): Promise<SwapState> => {
+    const { data } = await api.put<SwapState>(`/leagues/${leagueId}/swap/claims`, { claims });
     return data;
   },
 };
@@ -298,11 +327,6 @@ export const rosterApi = {
 
   getAllRosters: async (leagueId: number): Promise<MemberRoster[]> => {
     const { data } = await api.get<MemberRoster[]>(`/rosters/${leagueId}`);
-    return data;
-  },
-
-  getAvailableTeams: async (leagueId: number): Promise<Team[]> => {
-    const { data } = await api.get<Team[]>(`/rosters/${leagueId}/available`);
     return data;
   },
 };

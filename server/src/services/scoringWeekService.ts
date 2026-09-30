@@ -145,3 +145,26 @@ export function gamesForTeamWeek(
 ): ScoredGame[] {
   return map.get(teamId)?.get(week) ?? [];
 }
+
+/**
+ * A team's season so far, owner or not: Pick 6 points from every game
+ * (the same pointsForTeam formula) and its decided W-L.
+ */
+export function seasonRecord(
+  map: ScoringWeekMap,
+  teamId: number
+): { points: number; wins: number; losses: number } {
+  let points = 0;
+  let wins = 0;
+  let losses = 0;
+  for (const games of map.get(teamId)?.values() ?? []) {
+    for (const game of games) {
+      points += pointsForTeam(game, teamId);
+      if (game.status === GameStatus.FINAL && game.winnerTeamId) {
+        if (game.winnerTeamId === teamId) wins++;
+        else losses++;
+      }
+    }
+  }
+  return { points, wins, losses };
+}

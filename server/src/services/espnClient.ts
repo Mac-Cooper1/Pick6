@@ -365,6 +365,32 @@ export async function fetchConferenceTeamIds(
     .filter(Boolean) as string[];
 }
 
+/**
+ * ESPN FPI strength-of-schedule rank for games already played (1 = hardest
+ * in FBS), keyed by ESPN team id. Field `avgsosrank`: the same numbers as
+ * the SOS column on espn.com/college-football/fpi/_/view/resume. Teams with
+ * no rank yet (no games played) are left out.
+ */
+export async function fetchSosRanks(seasonYear: number): Promise<Map<string, number>> {
+  const url = `https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/seasons/${seasonYear}/powerindex?limit=300`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`ESPN FPI error: ${response.status} ${response.statusText}`);
+  }
+
+  const data: any = await response.json();
+  const ranks = new Map<string, number>();
+  for (const item of data.items || []) {
+    const espnId = String(item.team?.$ref || '').match(/\/teams\/(\d+)/)?.[1];
+    const rank = item.predictives?.find((p: any) => p.name === 'avgsosrank')?.value;
+    if (espnId && typeof rank === 'number' && rank > 0) {
+      ranks.set(espnId, Math.round(rank));
+    }
+  }
+  return ranks;
+}
+
 // ============================================
 // KICKOFF LOCK HELPERS FOR FAAB AUCTION
 // ============================================

@@ -25,12 +25,15 @@ import { ParsedGame } from '../src/services/espnClient';
 import { ParsedOdds } from '../src/services/oddsClient';
 import { getUserRoster, getAllRosters } from '../src/services/rosterService';
 import {
-  openSwapWindow,
-  closeSwapWindow,
-  performSwap,
-  passSwap,
+  getSwapSchedule,
   getSwapState,
+  getSwapTeams,
+  saveSwapClaims,
+  runSwap,
+  runDueSwaps,
+  SWAP_MAX_CLAIMS,
 } from '../src/services/swapService';
+import { getStandings } from '../src/services/standingsService';
 
 // The smoke league lives in its own season so its synthetic games can never
 // collide with real Game rows synced into the local DB (a real still-
@@ -84,6 +87,7 @@ async function main() {
     where: { email: { in: ['smoke1@test.local', 'smoke2@test.local', 'smoke3@test.local'] } },
   });
   await prisma.seasonWeek.deleteMany({ where: { seasonYear: SMOKE_SEASON } });
+  await prisma.teamSos.deleteMany({ where: { seasonYear: SMOKE_SEASON } });
 
   // Private calendar for the smoke season (same dates as the real one)
   const calendar = await prisma.seasonWeek.findMany({
@@ -324,7 +328,7 @@ async function main() {
   assert(alicePts === 3, `Alice week 1 = 3 (1+2+1−1+0) — got ${alicePts}`);
   assert(bobPts === 1, `Bob week 1 = 1 (0−1+0+2+0) — got ${bobPts}`);
 
-  // ---------- Effective-week roster: simulated week-5 swap ----------
+  // ---------- Effective-week roster: simulated swap (closes wk 5, opens wk 6) ----------
   console.log('— Swap safety (effective weeks)');
   const aliceG6 = await prisma.rosterSlot.findFirst({
     where: { leagueId: league.id, userId: alice.id, slot: ConferenceSlot.G6, toWeek: null },
@@ -381,92 +385,361 @@ async function main() {
   const aliceW6 = week6.scores.find((s) => s.userId === alice.id)?.points;
   assert(aliceW6 === 1, `week 6 scores the swapped-in team (+1) — got ${aliceW6}`);
 
-  // ---------- WS8: swap window (turns, pass, free phase, close) ----------
-  console.log('— Swap window (WS8)');
+  // ---------- Week-6 swap: private lists in week 5, one run at week 6 ----------
+  console.log('— Week 6 swap');
 
-  // Points through week 5: Carol 0 (no roster), Bob 1, Alice 3 → that order
-  let swap = await openSwapWindow(league.id);
-  assert(swap.status === 'OPEN', 'window opens');
-  assert(swap.order.length === 3, `order includes all 3 members (got ${swap.order.length})`);
+  // Explicit clock values keep this section date-independent
+  const { opensAt, locksAt } = await getSwapSchedule(SMOKE_SEASON);
+  const HOUR = 3600 * 1000;
+  const beforeLists = new Date(opensAt.getTime() - HOUR);
+  const listsOpen = new Date(locksAt.getTime() - HOUR);
+  const afterLock = new Date(locksAt.getTime() + HOUR);
+
+  // Carol joined after the draft; give her five unowned teams so she's in
+  // the run too. Points through week 5: Carol 0, Bob 1, Alice 3.
+  for (const slot of DRAFT_SLOTS) {
+    const team = await prisma.team.findFirst({
+      where: { slot, rosterSlots: { none: { leagueId: league.id, toWeek: null } } },
+      orderBy: { name: 'asc' },
+    });
+    await prisma.rosterSlot.create({
+      data: { leagueId: league.id, userId: carol.id, slot, teamId: team!.id, fromWeek: 1 },
+    });
+  }
+  const carolRoster = await getUserRoster(league.id, carol.id);
+  const teamIn = (roster: typeof aliceRoster, slot: ConferenceSlot) =>
+    roster.find((r) => r.slot === slot)!.teamId;
+  const carolSEC = teamIn(carolRoster, ConferenceSlot.SEC);
+  const bobSEC = teamIn(bobRoster, ConferenceSlot.SEC);
+  const bobB1G = teamIn(bobRoster, ConferenceSlot.BIG_TEN);
+  const bobG6 = teamIn(bobRoster, ConferenceSlot.G6); // lost smoke-g6 in week 6 above
+  const aliceSEC = teamIn(aliceRoster, ConferenceSlot.SEC);
+  const aliceB1G = teamIn(aliceRoster, ConferenceSlot.BIG_TEN);
+  const aliceACC = teamIn(aliceRoster, ConferenceSlot.ACC_ND);
+
+  const freeTeams = (slot: ConferenceSlot, take: number) =>
+    prisma.team.findMany({
+      where: { slot, rosterSlots: { none: { leagueId: league.id, toWeek: null } } },
+      orderBy: { name: 'asc' },
+      take,
+    });
+  const [secA, secB] = await freeTeams(ConferenceSlot.SEC, 2);
+  const [b1gA] = await freeTeams(ConferenceSlot.BIG_TEN, 1);
+  const [accKickedOff] = await freeTeams(ConferenceSlot.ACC_ND, 1);
+  const [g6Free] = await freeTeams(ConferenceSlot.G6, 1);
+
+  let swapState = await getSwapState(league.id, carol.id, beforeLists);
+  assert(swapState.phase === 'upcoming', 'before week 5: lists not open yet');
+  await expectThrow(
+    () => saveSwapClaims(league.id, carol.id, [{ dropTeamId: carolSEC, addTeamId: secA.id }], beforeLists),
+    'saving a list before week 5 rejected',
+    'open when week 5'
+  );
+
+  swapState = await getSwapState(league.id, carol.id, listsOpen);
+  assert(swapState.phase === 'open', 'week 5: lists open');
   assert(
-    swap.order[0].userId === carol.id && swap.order[1].userId === bob.id && swap.order[2].userId === alice.id,
-    'order is worst record first (Carol, Bob, Alice)'
-  );
-  assert(swap.onTheClockUserId === carol.id, 'Carol (worst) is on the clock');
-
-  await expectThrow(
-    () => performSwap(league.id, bob.id, bobRoster[0].teamId, 999999),
-    'swapping out of turn rejected',
-    'Not your turn'
+    swapState.order.map((o) => o.userId).join() === [carol.id, bob.id, alice.id].join(),
+    'projected order is worst record first (Carol 0, Bob 1, Alice 3)'
   );
 
-  swap = await passSwap(league.id, carol.id);
-  assert(swap.onTheClockUserId === bob.id, "after Carol passes, Bob is on the clock");
-
-  // Wrong-slot swap rejected
-  const freeG6 = await prisma.team.findFirst({
-    where: {
-      slot: ConferenceSlot.G6,
-      rosterSlots: { none: { leagueId: league.id, toWeek: null } },
-    },
+  // ---- SOS tiebreaker: tie Carol with Bob at 1 point through week 5 ----
+  await prisma.weeklyScore.create({
+    data: { leagueId: league.id, userId: carol.id, weekNumber: 2, points: 1 },
   });
-  await expectThrow(
-    () => performSwap(league.id, bob.id, bobRoster[0].teamId, freeG6!.id),
-    'cross-slot swap rejected',
-    'must stay in the'
-  );
+  const setSos = async (teamIds: number[], sosRank: number) => {
+    for (const teamId of teamIds) {
+      await prisma.teamSos.upsert({
+        where: { seasonYear_teamId: { seasonYear: SMOKE_SEASON, teamId } },
+        update: { sosRank },
+        create: { seasonYear: SMOKE_SEASON, teamId, sosRank },
+      });
+    }
+  };
+  const bobFive = bobRoster.map((r) => r.teamId);
+  const carolFive = carolRoster.map((r) => r.teamId);
+  const orderIds = async () =>
+    (await getSwapState(league.id, carol.id, listsOpen)).order.map((o) => o.userId).join();
 
-  // Bob's real swap: SEC for a free SEC team
-  const freeSec = await prisma.team.findFirst({
-    where: {
-      slot: ConferenceSlot.SEC,
-      rosterSlots: { none: { leagueId: league.id, toWeek: null } },
-    },
-  });
-  const bobSwap = await performSwap(league.id, bob.id, bobRoster[0].teamId, freeSec!.id);
-  assert(bobSwap.effectiveFromWeek === 6, `swap effective from week 6 (got ${bobSwap.effectiveFromWeek})`);
-
-  const bobOldRow = await prisma.rosterSlot.findFirst({
-    where: { leagueId: league.id, userId: bob.id, teamId: bobRoster[0].teamId },
-  });
-  assert(bobOldRow?.toWeek === 5, 'old team closed at week 5');
-
-  const bobWeek1After = await calculateLeagueScores(league.id, 1);
+  // Carol's schedules tougher (5 x 20 = 100 vs Bob's 5 x 60 = 300): she wins
+  // the tie, ranks above Bob, so Bob swaps first
+  await setSos(bobFive, 60);
+  await setSos(carolFive, 20);
   assert(
-    bobWeek1After.scores.find((s) => s.userId === bob.id)?.points === 1,
-    'Bob week 1 unchanged after his swap (old team still counts)'
+    (await orderIds()) === [bob.id, carol.id, alice.id].join(),
+    'tie on points: lower combined SOS (tougher schedules) ranks higher, so the other player swaps first'
   );
 
-  swap = await getSwapState(league.id);
-  assert(swap.onTheClockUserId === alice.id, "after Bob swaps, Alice is on the clock");
+  // Flip the schedules: now Bob's are tougher and Carol swaps first
+  await setSos(bobFive, 20);
+  await setSos(carolFive, 60);
+  swapState = await getSwapState(league.id, carol.id, listsOpen);
+  assert(
+    swapState.order.map((o) => o.userId).join() === [carol.id, bob.id, alice.id].join() &&
+      swapState.order[0].sosTotal === 300 &&
+      swapState.order[1].sosTotal === 100,
+    'flipped schedules flip the tie (Carol 300 swaps before Bob 100)'
+  );
+
+  const leaderboard = await getStandings(league.id);
+  assert(
+    leaderboard.map((s) => s.member.userId).join() === [alice.id, bob.id, carol.id].join(),
+    'the leaderboard uses the same tiebreaker (Bob above Carol on equal points)'
+  );
+
+  // A team with no rank on file counts as one past the lowest rank (60 + 1)
+  await prisma.teamSos.delete({
+    where: { seasonYear_teamId: { seasonYear: SMOKE_SEASON, teamId: bobFive[0] } },
+  });
+  const bobRow = (await getStandings(league.id)).find((s) => s.member.userId === bob.id);
+  assert(bobRow?.sosTotal === 4 * 20 + 61, `unranked team counts as last + 1 (got ${bobRow?.sosTotal})`);
+  await setSos([bobFive[0]], 20);
 
   await expectThrow(
-    () => performSwap(league.id, bob.id, freeSec!.id, bobRoster[0].teamId),
-    'second swap by same member rejected',
+    () => saveSwapClaims(league.id, bob.id, [{ dropTeamId: bobSEC, addTeamId: b1gA.id }], listsOpen),
+    'cross-slot line rejected',
+    'stay in one slot'
+  );
+  await expectThrow(
+    () => saveSwapClaims(league.id, bob.id, [{ dropTeamId: carolSEC, addTeamId: secA.id }], listsOpen),
+    "dropping someone else's team rejected",
+    'on your roster'
+  );
+  await expectThrow(
+    () => saveSwapClaims(league.id, bob.id, [{ dropTeamId: bobSEC, addTeamId: aliceSEC }], listsOpen),
+    'adding a rostered team rejected',
+    'already on a roster'
+  );
+  await expectThrow(
+    () =>
+      saveSwapClaims(
+        league.id,
+        bob.id,
+        [{ dropTeamId: bobSEC, addTeamId: secA.id }, { dropTeamId: bobSEC, addTeamId: secA.id }],
+        listsOpen
+      ),
+    'same team listed twice rejected',
+    'twice'
+  );
+  await expectThrow(
+    () =>
+      saveSwapClaims(
+        league.id,
+        bob.id,
+        Array.from({ length: SWAP_MAX_CLAIMS + 1 }, () => ({ dropTeamId: bobSEC, addTeamId: secA.id })),
+        listsOpen
+      ),
+    `list longer than ${SWAP_MAX_CLAIMS} rejected`,
+    'up to'
+  );
+
+  // A member who already swapped (retired turn-based window) can't set a list
+  await prisma.leagueMember.update({
+    where: { leagueId_userId: { leagueId: league.id, userId: alice.id } },
+    data: { swapUsed: true },
+  });
+  await expectThrow(
+    () => saveSwapClaims(league.id, alice.id, [], listsOpen),
+    'member who already swapped cannot set a list',
     'already used'
   );
+  await prisma.leagueMember.update({
+    where: { leagueId_userId: { leagueId: league.id, userId: alice.id } },
+    data: { swapUsed: false },
+  });
 
-  swap = await passSwap(league.id, alice.id);
-  assert(swap.freePhase && swap.onTheClockUserId === null, 'all turns done → free phase');
+  await saveSwapClaims(league.id, carol.id, [{ dropTeamId: carolSEC, addTeamId: secB.id }], listsOpen);
+  swapState = await saveSwapClaims(
+    league.id,
+    carol.id,
+    [{ dropTeamId: carolSEC, addTeamId: secA.id }],
+    listsOpen
+  );
+  assert(
+    swapState.myClaims.length === 1 && swapState.myClaims[0].addTeamId === secA.id,
+    'saving again replaces the whole list'
+  );
+  swapState = await saveSwapClaims(
+    league.id,
+    bob.id,
+    [
+      { dropTeamId: bobSEC, addTeamId: secA.id }, // Carol takes it first → missed
+      { dropTeamId: bobG6, addTeamId: g6Free.id }, // Bob's G6 already played week 6 → missed
+      { dropTeamId: bobSEC, addTeamId: secB.id }, // goes through
+      { dropTeamId: bobB1G, addTeamId: b1gA.id }, // unused: Bob already swapped
+    ],
+    listsOpen
+  );
+  assert(
+    swapState.myClaims.map((c) => c.priority).join() === '1,2,3,4' &&
+      swapState.myClaims[2].addTeamId === secB.id,
+    'list saved in priority order'
+  );
+  const carolView = await getSwapState(league.id, carol.id, listsOpen);
+  assert(
+    carolView.myClaims.length === 1 && carolView.myClaims[0].dropTeamId === carolSEC,
+    "lists are private: Carol sees only her own line"
+  );
 
-  // Free phase: Alice (passed, but never swapped) can still swap
-  const freeB1G = await prisma.team.findFirst({
-    where: {
-      slot: ConferenceSlot.BIG_TEN,
-      rosterSlots: { none: { leagueId: league.id, toWeek: null } },
+  // The API refuses rostered teams, so no saved line can name a team that
+  // is dropped in the run. Plant one anyway (Alice #1 wants Bob's SEC team,
+  // which Bob drops at #2) to prove the run never hands a dropped team to
+  // someone later in the order.
+  await prisma.swapClaim.createMany({
+    data: [
+      { dropTeamId: aliceSEC, addTeamId: bobSEC }, // dropped by Bob → missed
+      { dropTeamId: aliceACC, addTeamId: accKickedOff.id }, // kicked off in week 6 → missed
+      { dropTeamId: aliceB1G, addTeamId: b1gA.id }, // goes through
+    ].map((line, i) => ({ leagueId: league.id, userId: alice.id, priority: i + 1, ...line })),
+  });
+
+  // A late run: accKickedOff's week-6 game is already final
+  const fcsTeam = await prisma.team.findFirst({ where: { slot: ConferenceSlot.NONE } });
+  await prisma.game.create({
+    data: {
+      espnEventId: 'smoke-g9',
+      seasonYear: SMOKE_SEASON,
+      weekNumber: 6,
+      homeTeamId: accKickedOff.id,
+      awayTeamId: fcsTeam!.id,
+      startTime: new Date(locksAt.getTime() + HOUR / 2),
+      status: GameStatus.FINAL,
+      homeScore: 31,
+      awayScore: 3,
+      winnerTeamId: accKickedOff.id,
     },
   });
-  const aliceB1G = aliceRoster.find((r) => r.slot === 'BIG_TEN')!;
-  const aliceSwap = await performSwap(league.id, alice.id, aliceB1G.teamId, freeB1G!.id);
-  assert(aliceSwap.effectiveFromWeek === 6, 'free-phase swap works after passing');
 
-  swap = await closeSwapWindow(league.id);
-  assert(swap.status === 'CLOSED', 'commissioner closes the window');
-  await expectThrow(
-    () => performSwap(league.id, carol.id, 1, 2),
-    'swap after close rejected',
-    'not open'
+  // The swap page's board: unowned teams by Pick 6 points, plus your five
+  const board = await getSwapTeams(league.id, bob.id);
+  const kickedOffRow = board.available.find((t) => t.teamId === accKickedOff.id);
+  assert(
+    board.available[0].teamId === accKickedOff.id &&
+      kickedOffRow?.points === 1 &&
+      kickedOffRow.wins === 1 &&
+      kickedOffRow.losses === 0,
+    `board: available teams sorted by Pick 6 points (${accKickedOff.name} 1-0, +1 on top)`
   );
+  assert(
+    board.available.every((t, i) => i === 0 || board.available[i - 1].points >= t.points) &&
+      !board.available.some((t) => [...bobFive, ...carolFive].includes(t.teamId)),
+    'board: only unowned teams, never increasing points'
+  );
+  const bobG6Row = board.mine.find((t) => t.teamId === bobG6);
+  assert(
+    board.mine.map((t) => t.slot).join() === DRAFT_SLOTS.join() &&
+      bobG6Row?.points === 0 &&
+      bobG6Row.wins === 0 &&
+      bobG6Row.losses === 1,
+    "board: your five in slot order with their season (Bob's G6 0-1, 0 pts)"
+  );
+
+  assert(
+    (await runDueSwaps(SMOKE_SEASON, listsOpen)).length === 0,
+    'nothing runs while lists are open'
+  );
+  await expectThrow(
+    () => saveSwapClaims(league.id, carol.id, [], afterLock),
+    'lists lock when week 6 starts',
+    'locked'
+  );
+
+  const run = (await runDueSwaps(SMOKE_SEASON, afterLock)).find((r) => r.leagueId === league.id);
+  assert(run?.swaps === 3, `run made 3 swaps, one per member (got ${run?.swaps})`);
+
+  const bobResult = await getSwapState(league.id, bob.id, afterLock);
+  assert(bobResult.phase === 'complete', 'phase is complete after the run');
+  assert(
+    bobResult.order.map((o) => o.userId).join() === [carol.id, bob.id, alice.id].join(),
+    'run order: Carol, Bob, Alice'
+  );
+  assert(
+    bobResult.myClaims.map((c) => c.status).join() === 'MISSED,MISSED,SWAPPED,UNUSED',
+    `Bob: #1 missed, #2 missed, #3 swapped, #4 unused (got ${bobResult.myClaims.map((c) => c.status).join()})`
+  );
+  assert(
+    !!bobResult.myClaims[0].note?.includes('Smoke Carol took'),
+    `a taken team's note names who took it (got "${bobResult.myClaims[0].note}")`
+  );
+  assert(
+    !!bobResult.myClaims[1].note?.includes('already played in week 6'),
+    `a drop team that already played stays put (got "${bobResult.myClaims[1].note}")`
+  );
+
+  const aliceResult = await getSwapState(league.id, alice.id, afterLock);
+  assert(
+    aliceResult.myClaims.map((c) => c.status).join() === 'MISSED,MISSED,SWAPPED',
+    `Alice: #1 missed, #2 missed, #3 swapped (got ${aliceResult.myClaims.map((c) => c.status).join()})`
+  );
+  assert(
+    !!aliceResult.myClaims[0].note?.includes('dropped in the swap'),
+    `a team dropped earlier in the run can't be picked up later (got "${aliceResult.myClaims[0].note}")`
+  );
+  assert(
+    !!aliceResult.myClaims[1].note?.includes('already played in week 6'),
+    'a team that already kicked off in week 6 cannot be added'
+  );
+  assert(
+    aliceResult.order[0].swap?.addTeamName === secA.name &&
+      aliceResult.myClaims.every((c) => c.dropTeamId !== carolSEC),
+    "after the run everyone sees each member's swap, but not their lists"
+  );
+
+  const carolRows = await prisma.rosterSlot.findMany({
+    where: { leagueId: league.id, userId: carol.id, slot: ConferenceSlot.SEC },
+    orderBy: { fromWeek: 'asc' },
+  });
+  assert(
+    carolRows.length === 2 &&
+      carolRows[0].teamId === carolSEC &&
+      carolRows[0].toWeek === 5 &&
+      carolRows[1].teamId === secA.id &&
+      carolRows[1].fromWeek === 6 &&
+      carolRows[1].toWeek === null,
+    'old team kept through week 5, new team from week 6'
+  );
+  assert(
+    (await prisma.rosterSlot.count({
+      where: { leagueId: league.id, teamId: { in: [carolSEC, bobSEC] }, toWeek: null },
+    })) === 0,
+    'dropped teams stay unowned'
+  );
+  assert(
+    (await prisma.leagueMember.count({ where: { leagueId: league.id, swapUsed: true } })) === 3,
+    'all three members used their swap'
+  );
+
+  const week1AfterRun = await calculateLeagueScores(league.id, 1);
+  assert(
+    week1AfterRun.scores.find((s) => s.userId === alice.id)?.points === 3 &&
+      week1AfterRun.scores.find((s) => s.userId === bob.id)?.points === 1,
+    'week 1 unchanged after the run (history is untouchable)'
+  );
+
+  // Week 6: Bob's new SEC team beats Carol's dropped one
+  await prisma.game.create({
+    data: {
+      espnEventId: 'smoke-g10',
+      seasonYear: SMOKE_SEASON,
+      weekNumber: 6,
+      homeTeamId: secB.id,
+      awayTeamId: carolSEC,
+      startTime: new Date(locksAt.getTime() + 5 * 24 * HOUR),
+      status: GameStatus.FINAL,
+      homeScore: 24,
+      awayScore: 17,
+      winnerTeamId: secB.id,
+    },
+  });
+  await finalizeGames(SMOKE_SEASON, 6);
+  const week6AfterRun = await calculateLeagueScores(league.id, 6);
+  assert(
+    week6AfterRun.scores.find((s) => s.userId === bob.id)?.points === 1 &&
+      week6AfterRun.scores.find((s) => s.userId === carol.id)?.points === 0,
+    'week 6 scores the new team (Bob +1), not the dropped one (Carol 0)'
+  );
+
+  assert((await runSwap(league.id, afterLock)) === null, 'a second run is a no-op');
 
   // ---------- Double-game weeks (ESPN's two-weekend Week 1) ----------
   console.log('— Double-game attribution');

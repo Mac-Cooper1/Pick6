@@ -106,6 +106,9 @@ export interface Standing {
     name: string;
   };
   points: number;
+  // Overall standings only. Tiebreaker on equal points: combined ESPN SOS
+  // rank of the player's five (lower = tougher schedules = ranks higher)
+  sosTotal?: number;
 }
 
 // Error response
