@@ -67,18 +67,15 @@ const PHASE_LABEL: Record<SwapState['phase'], string> = {
 const ICON_BUTTON_CLASS =
   'w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-gray-500 hover:text-gray-800 hover:bg-gray-100 active:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed';
 
-function Pair({ drop, add, dropPoints, addPoints }: {
-  drop: string;
-  add: string;
-  dropPoints?: number;
-  addPoints?: number;
-}) {
+// No points on a swap line: they'd read as points changing hands, and a
+// swap never moves points (see the note on the board)
+function Pair({ drop, add }: { drop: string; add: string }) {
   return (
     <span className="font-medium text-gray-900">
-      {drop} <Points value={dropPoints} className="text-sm" />
+      {drop}
       <ArrowRight size={14} weight="bold" className="inline mx-1.5 -mt-0.5 text-amber-600" aria-hidden />
       <span className="sr-only"> to </span>
-      {add} <Points value={addPoints} className="text-sm" />
+      {add}
     </span>
   );
 }
@@ -156,9 +153,6 @@ export function SwapTab({ leagueId }: SwapTabProps) {
   const listFull = lines.length >= state.maxClaims;
   const me = order.find((o) => o.userId === user?.id);
 
-  const pointsByTeam = new Map(
-    [...(teams?.available ?? []), ...(teams?.mine ?? [])].map((t) => [t.teamId, t.points])
-  );
   const priorityByAdd = new Map(myClaims.map((c) => [c.addTeamId, c.priority]));
   const myTeamIn = (slot: ConferenceSlot) => teams?.mine.find((t) => t.slot === slot);
   const tiedOnPoints = (points: number) => order.filter((o) => o.points === points).length > 1;
@@ -320,12 +314,7 @@ export function SwapTab({ leagueId }: SwapTabProps) {
                       <div className="min-w-0 flex-1">
                         <p className="label text-[11px]">{claim.slotLabel}</p>
                         <p className="text-sm">
-                          <Pair
-                            drop={claim.dropTeamName}
-                            add={claim.addTeamName}
-                            dropPoints={pointsByTeam.get(claim.dropTeamId)}
-                            addPoints={pointsByTeam.get(claim.addTeamId)}
-                          />
+                          <Pair drop={claim.dropTeamName} add={claim.addTeamName} />
                         </p>
                         {claim.status === 'MISSED' && claim.note && (
                           <p className="text-xs text-gray-500 mt-0.5">{claim.note}</p>
@@ -388,6 +377,11 @@ export function SwapTab({ leagueId }: SwapTabProps) {
               <p className="text-xs text-gray-500 mt-0.5">
                 Every unowned team, most Pick 6 points this season first.
                 {editable && ' Add puts a team on your list against your team in the same slot.'}
+              </p>
+              <p className="text-xs text-gray-700 mt-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                <span className="font-semibold">Points don't transfer.</span> A team's points here
+                show how it has played this season. Everything you've scored stays yours, and a new
+                team only starts scoring for you in week {swapWeek}.
               </p>
             </div>
             <div className="px-4 pb-3 flex gap-2 overflow-x-auto no-scrollbar border-b border-gray-200">
