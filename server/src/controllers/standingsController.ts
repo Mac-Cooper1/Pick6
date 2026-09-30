@@ -16,6 +16,7 @@ interface WeekDetailTeam {
   slotLabel: string;
   teamId: number;
   teamName: string;
+  fromWeek: number; // > 1 = added in the week-6 swap
   opponent: string | null;
   result: 'W' | 'L' | 'pending' | 'none';
   scoreLine: string | null;
@@ -139,6 +140,7 @@ export async function getWeekDetail(req: AuthRequest, res: Response) {
         slotLabel: SLOT_LABELS[rs.slot],
         teamId: rs.teamId,
         teamName: rs.team.name,
+        fromWeek: rs.fromWeek,
       };
       const games = gamesForTeamWeek(scoringWeeks, rs.teamId, weekNumber);
 

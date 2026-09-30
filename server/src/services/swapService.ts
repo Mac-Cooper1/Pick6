@@ -56,10 +56,18 @@ interface SwapOrderEntry {
   position: number;
   userId: number;
   userName: string;
-  points: number; // through week 5: the standings that set the order
+  // Through week 5, the standings that set the order: live until the run,
+  // then the values saved when it ran
+  points: number;
   sosTotal: number; // the tiebreaker on equal points (lower = ranks higher)
   swapUsed: boolean;
-  swap: { slotLabel: string; dropTeamName: string; addTeamName: string } | null;
+  listSize: number | null; // lines on their list, shown once the run is done
+  swap: {
+    slotLabel: string;
+    dropTeamName: string;
+    addTeamName: string;
+    choice: number; // which line of their list went through
+  } | null;
 }
 
 export interface SwapState {
@@ -183,6 +191,17 @@ export async function getSwapState(
   const swappedByUser = new Map(
     claims.filter((c) => c.status === SwapClaimStatus.SWAPPED).map((c) => [c.userId, c])
   );
+  // After the run, how long each list was ("no list" vs "all gone"); the
+  // lines themselves stay private
+  const listSizes =
+    phase === 'complete'
+      ? await prisma.swapClaim.groupBy({
+          by: ['userId'],
+          where: { leagueId },
+          _count: { _all: true },
+        })
+      : [];
+  const listSizeByUser = new Map(listSizes.map((s) => [s.userId, s._count._all]));
 
   return {
     swapWeek: SWAP_WEEK,
@@ -198,14 +217,16 @@ export async function getSwapState(
         position: index + 1,
         userId: member.userId,
         userName: member.user.name,
-        points,
-        sosTotal,
+        points: member.swapPoints ?? points,
+        sosTotal: member.swapSos ?? sosTotal,
         swapUsed: member.swapUsed,
+        listSize: phase === 'complete' ? listSizeByUser.get(member.userId) ?? 0 : null,
         swap: swapped
           ? {
               slotLabel: SLOT_LABELS[swapped.addTeam.slot],
               dropTeamName: swapped.dropTeam.name,
               addTeamName: swapped.addTeam.name,
+              choice: swapped.priority,
             }
           : null,
       };
@@ -383,10 +404,12 @@ export async function runSwap(
       const addedBy = new Map<number, string>();
       let swaps = 0;
 
-      for (const [index, { member }] of standings.entries()) {
+      for (const [index, { member, points, sosTotal }] of standings.entries()) {
+        // Save what set the position: SOS ranks move daily, so the recap
+        // couldn't recompute them later
         await tx.leagueMember.update({
           where: { id: member.id },
-          data: { swapOrder: index + 1 },
+          data: { swapOrder: index + 1, swapPoints: points, swapSos: sosTotal },
         });
 
         // swapUsed can already be true from the retired turn-based window

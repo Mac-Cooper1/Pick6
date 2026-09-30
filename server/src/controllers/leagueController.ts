@@ -5,6 +5,7 @@ import { generateJoinCode, validateJoinCode } from '../utils/joinCode';
 import { getCurrentWeek } from '../services/seasonService';
 import { assignDraftOrder, getDraftState } from '../services/draftService';
 import { getStandings } from '../services/standingsService';
+import { getAllRosters } from '../services/rosterService';
 import { getIOInstance } from '../socket/draftSocket';
 import prisma from '../lib/prisma';
 import { MemberRole, DraftStatus } from '@prisma/client';
@@ -257,39 +258,36 @@ export async function getLeagueMembers(req: AuthRequest, res: Response, next: an
       throw new AppError('Not a member of this league', 403);
     }
 
-    // Get all members with their drafted teams
-    const members = await prisma.leagueMember.findMany({
-      where: { leagueId },
-      include: {
-        user: {
-          include: {
-            draftPicks: {
-              where: { leagueId },
-              include: {
-                team: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        joinedAt: 'asc',
-      },
-    });
+    // Each member's current five (roster rows still active), not their
+    // draft picks: the week-6 swap or a hand-added roster changes the five,
+    // and the League tab shows the five. The draft pick is kept when known.
+    const [members, rosters, picks] = await Promise.all([
+      prisma.leagueMember.findMany({
+        where: { leagueId },
+        include: { user: true },
+        orderBy: { joinedAt: 'asc' },
+      }),
+      getAllRosters(leagueId),
+      prisma.draftPick.findMany({ where: { leagueId } }),
+    ]);
 
     const response = members.map((m) => ({
       id: m.user.id,
       name: m.user.name,
       email: m.user.email,
       joinedAt: m.joinedAt,
-      teams: m.user.draftPicks.map((pick) => ({
-        id: pick.team.id,
-        name: pick.team.name,
-        conference: pick.team.conference,
-        slot: pick.team.slot,
-        pickNumber: pick.pickNumber,
-        round: pick.round,
-      })),
+      teams: (rosters.find((r) => r.userId === m.userId)?.roster ?? []).map((entry) => {
+        const pick = picks.find((p) => p.userId === m.userId && p.teamId === entry.teamId);
+        return {
+          id: entry.teamId,
+          name: entry.teamName,
+          conference: entry.conference,
+          slot: entry.slot,
+          fromWeek: entry.fromWeek, // > 1 = added in the week-6 swap
+          pickNumber: pick?.pickNumber ?? null,
+          round: pick?.round ?? null,
+        };
+      }),
     }));
 
     res.json(response);

@@ -9,6 +9,7 @@ import { standingsApi, WeekDetailTeam } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
+import { SwapBadge } from './SwapBadge';
 
 interface WeekByWeekTabProps {
   leagueId: number;
@@ -182,6 +183,11 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
                           )}
                         </div>
                         <div className="font-semibold text-sm leading-tight break-words">{team.teamName}</div>
+                        {team.fromWeek > 1 && (
+                          <div className="mt-1">
+                            <SwapBadge fromWeek={team.fromWeek} />
+                          </div>
+                        )}
                         <div className="flex items-start justify-between gap-1 mt-1">
                           <span className="text-gray-500 break-words leading-tight min-w-0">
                             {team.opponent ? `vs ${team.opponent}` : 'no game'}

@@ -93,9 +93,11 @@ export interface LeagueMember {
   teams: TeamWithPickInfo[];
 }
 
+// A member's current team (roster, not draft picks: the week-6 swap changes it)
 export interface TeamWithPickInfo extends Team {
-  pickNumber: number;
-  round: number;
+  fromWeek: number; // > 1 = added in the week-6 swap
+  pickNumber: number | null; // null for a team they didn't draft
+  round: number | null;
 }
 
 // Standings types
