@@ -154,8 +154,19 @@ which game it opens on, the schedule cache timing, the Game-row-only fallback: E
 so the card's end-to-end checks run exactly like an ESPN outage). It wipes/recreates its own data (league `SMOKE1`,
 `smoke1@test.local`/`smoke123`) in its **own season year 2099** with a
 copied calendar, so real Game rows synced into the local DB can never
-collide with its synthetic games — **never point it at prod**. Before ending a turn: `npx tsc` in `server/`, `npm run build` in
+collide with its synthetic games — **never point it at prod**. Before ending a turn: `npm run lint` in both packages, `npx tsc` in `server/`, `npm run build` in
 `client/`.
+
+**Lint + PR check (Sep 30)**: ESLint 10 flat configs (`client/eslint.config.js`,
+`server/eslint.config.mjs`), `npm run lint` = `--max-warnings 0`. Deliberate
+choices: `@typescript-eslint/no-explicit-any` is off (untyped ESPN/Odds JSON,
+caught errors); React hooks = the classic two rules only (the plugin's
+React Compiler rules assume a compiler this app doesn't use); unused
+args/caught errors may be `_`-prefixed (Express's 4-argument error
+handler). The server's tsconfig `lib` is ES2022 so `new Error(msg, { cause })`
+types; `target` stays ES2020. `.github/workflows/checks.yml` runs lint +
+`tsc` (server, after `prisma generate`) and lint + `vite build` (client) on
+every PR and push to `main`; it can't run the smoke test (no Postgres).
 
 **Phone-viewport checks** (no device needed): headless Chrome is installed —
 drive it with `puppeteer-core` from the scratchpad, mint a JWT for a test
@@ -320,4 +331,11 @@ league shows real points. Same night after Mac merged it (PR #19): one
 Season tab instead of Game Log + Schedule, the League tab opens the card,
 and the speed/ESPN-safety pass on `teamCardService`'s cache. Mac OK'd two
 follow-ups for later (NOTES.md parking lot): ESLint across the repo and
-the `npm audit` findings in Render's deploy log.
+the `npm audit` findings in Render's deploy log. Both done right after
+PR #20: `npm audit` server 14 -> 0 (bcrypt 5 -> 6: same `hash`/`compare`,
+prebuilt binaries instead of the install-time downloader that pulled in
+the critical `tar`; bcrypt-5 hashes verified to log in), client 30 -> 4
+(major-version-only, none in production; parked in NOTES.md); Login's
+`?next=` now goes through `internalPath` (resolved against our origin, so
+`/\evil.com` and tab tricks can't redirect off-site); ESLint + the PR check
+above.

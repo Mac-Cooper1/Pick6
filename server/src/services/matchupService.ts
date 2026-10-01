@@ -415,7 +415,7 @@ export async function getRosterMatchups(
     const team = rt.team;
     const gameMatch = findGameForTeam(team.name, team.espnTeamId, games || []);
 
-    let matchup: TeamMatchup = {
+    const matchup: TeamMatchup = {
       teamId: team.id,
       teamName: team.name,
       abbreviation: team.abbreviation,

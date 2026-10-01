@@ -32,6 +32,6 @@ export function verifyToken(token: string): JWTPayload {
   try {
     return jwt.verify(token, getJwtSecret()) as JWTPayload;
   } catch (error) {
-    throw new Error('Invalid token');
+    throw new Error('Invalid token', { cause: error });
   }
 }

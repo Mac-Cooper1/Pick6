@@ -14,18 +14,6 @@ interface EnvConfig {
   ESPN_GROUP_ID: string;
 }
 
-function getRequiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(
-      `Missing required environment variable: ${name}\n` +
-      `  Please check your .env file or environment configuration.\n` +
-      `  See .env.example for required variables.`
-    );
-  }
-  return value;
-}
-
 function getOptionalEnv(name: string, defaultValue: string): string {
   return process.env[name] || defaultValue;
 }

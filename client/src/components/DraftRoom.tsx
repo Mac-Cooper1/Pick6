@@ -301,7 +301,6 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
     autoQueuedRef.current = sel;
     setQueue(newQueue);
     socketUpdateQueue(leagueId, newQueue);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTeam, draftState?.onTheClockUserId, user?.id, queue, leagueId]);
 
   const handleRemoveFromQueue = (teamId: number) => {

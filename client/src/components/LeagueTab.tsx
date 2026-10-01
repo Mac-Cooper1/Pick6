@@ -39,10 +39,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
   });
 
   // Fetch matchups for all members
-  const {
-    data: allMatchups,
-    isLoading: matchupsLoading,
-  } = useQuery({
+  const { data: allMatchups } = useQuery({
     queryKey: ['allMatchups', leagueId],
     queryFn: () => matchupApi.getAllMatchups(leagueId),
     enabled: !!league?.draftComplete,

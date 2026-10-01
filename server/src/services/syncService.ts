@@ -163,7 +163,7 @@ export async function syncOdds(
   }
 
   console.log('[Sync] Fetching odds from The Odds API');
-  let oddsData: ParsedOdds[] = [];
+  let oddsData: ParsedOdds[];
 
   try {
     oddsData = await getNCAAFSpreads();

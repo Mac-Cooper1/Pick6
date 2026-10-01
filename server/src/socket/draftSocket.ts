@@ -18,7 +18,6 @@ import {
   startDraft,
   checkScheduledDraft,
 } from '../services/draftService';
-import { DraftStatus } from '@prisma/client';
 
 // Extended socket interface with user data
 interface DraftSocket extends Socket {
@@ -56,7 +55,7 @@ export function initDraftSocket(io: Server) {
       socket.userId = payload.userId;
       socket.email = payload.email;
       next();
-    } catch (err) {
+    } catch {
       next(new Error('Invalid token'));
     }
   });

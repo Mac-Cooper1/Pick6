@@ -117,7 +117,7 @@ export function connectToDraft(
     socket?.emit('draft:join', { leagueId });
   });
 
-  socket.on('disconnect', (reason) => {
+  socket.on('disconnect', () => {
     handlers.onDisconnect?.();
   });
 

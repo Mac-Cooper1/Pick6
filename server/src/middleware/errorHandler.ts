@@ -8,7 +8,8 @@ export function errorHandler(
   error: any,
   req: Request,
   res: Response,
-  next: NextFunction
+  // Unused, but Express only treats 4-argument middleware as an error handler
+  _next: NextFunction
 ) {
   console.error('Error:', error);
 

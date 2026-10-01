@@ -11,6 +11,22 @@ type AuthMode = 'signin' | 'signup';
 // Manual reset path until we have a domain + email sending (see NOTES.md)
 const FORGOT_EMAIL = 'mac.cooper002@gmail.com';
 
+/**
+ * A `?next=` value that stays on this site, or null. Resolving it against
+ * our own origin catches every way a browser reads a path as another host:
+ * "//evil.com", "/\evil.com" (a backslash counts as a slash) and
+ * "/<tab>/evil.com" (tabs and newlines are dropped).
+ */
+function internalPath(raw: string | null): string | null {
+  if (!raw?.startsWith('/')) return null;
+  try {
+    const url = new URL(raw, window.location.origin);
+    return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export function Login() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -20,8 +36,7 @@ export function Login() {
 
   // Post-auth destination (set by ProtectedRoute / the 401 interceptor, e.g.
   // a shared join link). Internal paths only — never a full URL.
-  const rawNext = params.get('next');
-  const nextPath = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null;
+  const nextPath = internalPath(params.get('next'));
   const destination = nextPath || '/dashboard';
   // Collected as first + last but stored as one name: the User table keeps a
   // single (live, prod) name column, so the split lives only in this form

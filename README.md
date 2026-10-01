@@ -85,6 +85,13 @@ cd server && npx tsx scripts/smoke-test.ts
 
 Leaves an inspectable "Smoke League" — sign in as `smoke1@test.local` / `smoke123`.
 
+**Lint** (ESLint 10; the PR check runs it along with the type check and client build):
+
+```bash
+cd server && npm run lint
+cd client && npm run lint
+```
+
 ## Environment Variables
 
 **Server** (`server/.env`):
@@ -169,6 +176,14 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Sep 30, 2026 (after PR #20)** — Security updates, ESLint and a PR check (Mac's items 4 and 5):
+- **Server `npm audit`: 14 -> 0** (Render's log said 13; a new advisory landed since). The 1 critical (`tar`) and 2 highs lived in bcrypt 5's install-time binary downloader (`@mapbox/node-pre-gyp`), which only runs during `npm ci`. **bcrypt 5 -> 6** removes it: same `hash`/`compare` API, Node 18+, prebuilt binaries in the package, so the downloader and about 50 install-time packages are gone. Checked: a password hash made by bcrypt 5 at production cost still logs in under bcrypt 6 (and a wrong password is still rejected), via the real login endpoint too. The other 11 were request-handling DoS bugs fixed within current majors: express 4.21 -> 4.22.3 (body-parser, qs, path-to-regexp), socket.io internals (engine.io, socket.io-parser, ws) and jws (jsonwebtoken)
+- **Client `npm audit`: 30 -> 4.** Everything that ships to browsers is patched (axios 1.12 -> 1.20, react-router 6.30.1 -> 6.30.6, socket.io-client internals), as are most build tools, and the dead ESLint 8 toolchain (with its vulnerable `@typescript-eslint` v6 packages) is replaced below. The 4 left need major versions and don't reach production: 3 are Vite/esbuild dev-server bugs (production serves the built files from Express, not Vite) and 1 is React Router, whose two advisories are SSR-only (not used here) and a backslash open redirect that the login fix below closes for us. Parked in NOTES.md
+- **Login redirect hardening**: `?next=` (the after-login destination) accepted `/\evil.com` and `/<tab>/evil.com`, which browsers read as another site, so a crafted login link could bounce someone off Pick 6 after they signed in. It's now resolved against our own origin (`internalPath` in Login); anything that would leave the site goes to the dashboard. Normal links (shared join links, `/league/:id`) work as before
+- **ESLint 10 in both packages** (`npm run lint`, flat config, warnings fail): ESLint + typescript-eslint recommended, plus the two classic React hooks rules on the client. Off on purpose: `no-explicit-any` (83 uses, nearly all untyped ESPN/Odds JSON and caught errors) and the hooks plugin's React Compiler rules (no compiler here). Fixed the 23 findings: unused imports/variables/parameters, a dead env helper, two `try { } catch (e) { throw e }` wrappers in the standings controller, two dead assignments, `let` -> `const`, a needless regex escape, an unused eslint-disable comment, the `Function` type in `asyncHandler`, and the original error kept as `cause` when database connection errors are re-thrown (server tsconfig `lib` -> ES2022 for that; the emitted target is unchanged)
+- **PR check** (`.github/workflows/checks.yml`, free on a public repo): every PR and push to `main` runs server lint + type check and client lint + build on Node 22. It can't run the smoke test (that needs Postgres), so that stays a local step
+- Verified: smoke test **110/110**; `npm audit` server 0, client 4 (the major-only ones above); the workflow's exact steps replayed from a clean copy of the repo with no `.env`; login 200 / wrong password 401 on bcrypt 6; `?next=/\evil.example` lands on the dashboard while `?next=/league/10` still goes to the league; every tab plus the team card and the draft room's socket connection checked in the browser (20 API calls after a reload, none failed)
 
 **Sep 30, 2026 (after PR #19)** — Team card follow-ups (Mac's review):
 - **One Season tab** replaces Game Log + Schedule: the whole season in week order, results with each game's Pick 6 points, then the games still to play, byes included. The right column is Pick 6 points only (with a column head); lines moved into each row's detail line so a points "+1" can't be read as a spread
