@@ -3,10 +3,10 @@
  * sheet (bottom sheet on phones, centered dialog from `sm` up). Modeled on
  * ESPN fantasy's player card minus the roster moves: a header in the team's
  * color, a stat strip (Pick 6 points, record, rank, FPI SOS), then tabs for
- * the tapped game, the game log with each game's Pick 6 points, the rest of
- * the schedule (byes included: a bye scores 0) and ESPN headlines. Lines are
- * the stored ones scoring uses, and points come from the server
- * (pointsForTeam); nothing is scored here.
+ * the tapped game, the season (results with each game's Pick 6 points, then
+ * the games still to play, byes included: a bye scores 0) and ESPN
+ * headlines. Lines are the stored ones scoring uses, and points come from
+ * the server (pointsForTeam); nothing is scored here.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -31,12 +31,11 @@ interface TeamCardProps {
   onClose: () => void;
 }
 
-type CardTab = 'matchup' | 'log' | 'schedule' | 'news';
+type CardTab = 'matchup' | 'season' | 'news';
 
 const TABS: { id: CardTab; label: string }[] = [
   { id: 'matchup', label: 'Matchup' },
-  { id: 'log', label: 'Game Log' },
-  { id: 'schedule', label: 'Schedule' },
+  { id: 'season', label: 'Season' },
   { id: 'news', label: 'News' },
 ];
 
@@ -112,37 +111,28 @@ const NEWS_TYPE_LABELS: Record<string, string> = {
   Media: 'Video',
 };
 
-// ---------- season rows (log vs schedule) ----------
+// ---------- season rows ----------
 
 type SeasonRow = { kind: 'game'; game: TeamCardGame } | { kind: 'bye'; week: number };
 
 /**
- * Played games (and past byes) go to the log; everything else, including a
- * bye this week, to the schedule. Byes only fill weeks up to the team's last
- * known game, so a missing ESPN schedule never reads as a run of byes.
+ * The whole season in week order, played and upcoming together, with a bye
+ * row for every week the team is off. Byes only fill weeks up to the team's
+ * last known game, so a missing ESPN schedule never reads as a run of byes.
  */
-function splitSeason(card: TeamCardData): { log: SeasonRow[]; schedule: SeasonRow[] } {
-  const now = Date.now();
-  const played = (g: TeamCardGame) =>
-    g.status === 'final' ||
-    g.status === 'in_progress' ||
-    g.status === 'cancelled' ||
-    (g.status === 'postponed' && new Date(g.startTime).getTime() < now);
-
+function seasonRows(card: TeamCardData): SeasonRow[] {
   const lastKnownWeek = Math.max(0, ...card.games.map((g) => g.week));
   const weeks = new Set(card.games.map((g) => g.week));
   for (let week = 1; week <= lastKnownWeek; week++) weeks.add(week);
 
-  const log: SeasonRow[] = [];
-  const schedule: SeasonRow[] = [];
-  for (const week of [...weeks].sort((a, b) => a - b)) {
-    const games = card.games.filter((g) => g.week === week);
-    if (games.length === 0) {
-      (week < card.currentWeek ? log : schedule).push({ kind: 'bye', week });
-    }
-    for (const game of games) (played(game) ? log : schedule).push({ kind: 'game', game });
-  }
-  return { log, schedule };
+  return [...weeks]
+    .sort((a, b) => a - b)
+    .flatMap((week): SeasonRow[] => {
+      const games = card.games.filter((g) => g.week === week);
+      return games.length > 0
+        ? games.map((game): SeasonRow => ({ kind: 'game', game }))
+        : [{ kind: 'bye', week }];
+    });
 }
 
 // ---------- small pieces ----------
@@ -269,11 +259,15 @@ function GameRow({
       <>
         <span>{formatKickoff(game)}</span>
         {game.broadcast && <span className="font-semibold text-gray-700">{game.broadcast}</span>}
+        {game.teamSpread !== null && (
+          <span className="text-gray-400">line {formatSpread(game.teamSpread)}</span>
+        )}
       </>
     );
   }
 
-  // Right column: points once played, the stored line before kickoff
+  // Right column: Pick 6 points, once the game is final. Lines stay in the
+  // meta line so a +1 here is never mistaken for a spread.
   let right: React.ReactNode = null;
   if (final) {
     right =
@@ -289,17 +283,6 @@ function GameRow({
           ·
         </span>
       );
-  } else if (game.status === 'scheduled' && game.teamSpread !== null) {
-    right = (
-      <span
-        className={`font-display font-bold text-lg leading-none tabular-nums ${
-          game.teamSpread >= 3.5 ? 'text-green-700' : game.teamSpread <= -3.5 ? 'text-red-600' : 'text-gray-700'
-        }`}
-        title="The stored line scoring uses"
-      >
-        {formatSpread(game.teamSpread)}
-      </span>
-    );
   }
 
   return (
@@ -346,38 +329,44 @@ function ByeRow({ week, currentWeek }: { week: number; currentWeek: number }) {
 // ---------- panels ----------
 
 function SeasonList({
-  rows,
   card,
   myId,
-  empty,
   onSelect,
 }: {
-  rows: SeasonRow[];
   card: TeamCardData;
   myId: number | undefined;
-  empty: string;
   onSelect: (game: TeamCardGame) => void;
 }) {
+  const rows = seasonRows(card);
   if (rows.length === 0) {
-    return <p className="px-4 sm:px-5 py-8 text-center text-sm text-gray-500">{empty}</p>;
+    return <p className="px-4 sm:px-5 py-8 text-center text-sm text-gray-500">No games on the schedule yet.</p>;
   }
   return (
-    <ul className="divide-y divide-gray-100 py-1">
-      {rows.map((row) =>
-        row.kind === 'bye' ? (
-          <ByeRow key={`bye-${row.week}`} week={row.week} currentWeek={card.currentWeek} />
-        ) : (
-          <GameRow
-            key={row.game.espnEventId}
-            game={row.game}
-            currentWeek={card.currentWeek}
-            owner={card.owner}
-            myId={myId}
-            onSelect={() => onSelect(row.game)}
-          />
-        )
-      )}
-    </ul>
+    <div className="pb-1">
+      {/* Column heads, aligned with the rows below */}
+      <div className="flex items-center gap-3 px-4 sm:px-5 pt-2.5 pb-1 label text-[10px]" aria-hidden>
+        <span className="w-8 text-center">Wk</span>
+        <span className="flex-1 pl-10">Opponent</span>
+        <span className="w-10 text-right">Pts</span>
+        <span className="w-3.5" />
+      </div>
+      <ul className="divide-y divide-gray-100">
+        {rows.map((row) =>
+          row.kind === 'bye' ? (
+            <ByeRow key={`bye-${row.week}`} week={row.week} currentWeek={card.currentWeek} />
+          ) : (
+            <GameRow
+              key={row.game.espnEventId}
+              game={row.game}
+              currentWeek={card.currentWeek}
+              owner={card.owner}
+              myId={myId}
+              onSelect={() => onSelect(row.game)}
+            />
+          )
+        )}
+      </ul>
+    </div>
   );
 }
 
@@ -710,7 +699,6 @@ export function TeamCard({ leagueId, target, onClose }: TeamCardProps) {
     : null;
   const pick6 = card?.pick6;
   const ownerDiffers = owner && pick6 && pick6.ownerPoints !== null && pick6.ownerPoints !== pick6.points;
-  const seasonRows = card ? splitSeason(card) : null;
 
   // Portaled to <body>: the tabs render it inside space-y containers, whose
   // sibling margins would otherwise shift a fixed overlay
@@ -724,7 +712,7 @@ export function TeamCard({ leagueId, target, onClose }: TeamCardProps) {
         aria-modal="true"
         aria-labelledby="team-card-title"
         // Fixed height so the header doesn't jump as tabs change length
-        className="w-full sm:max-w-xl h-[92dvh] sm:h-[min(44rem,88dvh)] flex flex-col overflow-hidden bg-white rounded-t-2xl sm:rounded-xl shadow-card-lg animate-rise"
+        className="w-full sm:max-w-xl h-[92dvh] sm:h-[min(44rem,88dvh)] flex flex-col overflow-hidden bg-white rounded-t-2xl sm:rounded-xl shadow-card-lg animate-sheet"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header in the team's color */}
@@ -823,7 +811,7 @@ export function TeamCard({ leagueId, target, onClose }: TeamCardProps) {
             <div className="p-4 sm:p-5">
               <ErrorMessage message="Couldn't load this team. Try again in a minute." />
             </div>
-          ) : !card || !seasonRows ? (
+          ) : !card ? (
             <div className="py-12 text-center">
               <div
                 className="inline-block animate-spin rounded-full border-[3px] border-green-200 border-t-green-700 h-8 w-8"
@@ -837,10 +825,8 @@ export function TeamCard({ leagueId, target, onClose }: TeamCardProps) {
             <NewsPanel news={card.news} espnUrl={card.team.espnUrl} teamName={card.team.name} />
           ) : (
             <SeasonList
-              rows={tab === 'log' ? seasonRows.log : seasonRows.schedule}
               card={card}
               myId={user?.id}
-              empty={tab === 'log' ? 'No games played yet.' : 'No games left on the schedule.'}
               onSelect={(game) => {
                 setEventId(game.espnEventId);
                 showTab('matchup');

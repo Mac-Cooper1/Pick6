@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { SwapBadge } from './SwapBadge';
+import { TeamCard, TeamCardTarget } from './TeamCard';
 
 interface LeagueTabProps {
   leagueId: number;
@@ -55,6 +56,14 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
     staleTime: 3600000, // 1 hour
   });
 
+  // Tapping a team opens its TeamCard; the current week lets a bye say so
+  const [cardTarget, setCardTarget] = useState<TeamCardTarget | null>(null);
+  const { data: myLeagues } = useQuery({
+    queryKey: ['myLeagues'],
+    queryFn: () => leagueApi.getMyLeagues(),
+  });
+  const currentWeek = myLeagues?.find((l) => l.id === leagueId)?.currentWeek;
+
   // Create a map of abbreviation -> rank for quick lookup
   const rankingsMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -102,6 +111,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
           <p className="section-sub">
             {members?.length}/{league?.maxPlayers} players
             {league?.draftComplete && <span className="text-green-700 font-semibold"> &middot; draft complete</span>}
+            {league?.draftComplete && '. Tap a team for its season.'}
           </p>
         </div>
         <div className="card px-4 py-2.5 inline-flex items-center gap-3 self-start sm:self-auto">
@@ -151,9 +161,19 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                     const teamSpread = odds?.teamSpread;
 
                     return (
-                      <div
+                      <button
                         key={team.id}
-                        className="bg-gray-50 p-3 rounded-lg border border-gray-200"
+                        type="button"
+                        onClick={() =>
+                          setCardTarget({
+                            teamId: team.id,
+                            teamName: team.name,
+                            userId: member.id,
+                            eventId: game?.espnEventId ?? null,
+                            week: currentWeek,
+                          })
+                        }
+                        className="block w-full text-left bg-gray-50 p-3 rounded-lg border border-gray-200 transition-colors hover:border-green-600 hover:bg-white active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600"
                       >
                         {/* Team name with rank */}
                         <div className="flex items-center gap-2">
@@ -212,7 +232,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                             </div>
                           </div>
                         )}
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
@@ -225,6 +245,10 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
           <div className="card p-6 text-center text-gray-500">No members yet</div>
         )}
       </div>
+
+      {cardTarget && (
+        <TeamCard leagueId={leagueId} target={cardTarget} onClose={() => setCardTarget(null)} />
+      )}
     </div>
   );
 }

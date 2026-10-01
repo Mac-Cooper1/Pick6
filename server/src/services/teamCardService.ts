@@ -24,6 +24,7 @@ import { SLOT_LABELS } from './draftService';
 import {
   EspnHeadline,
   EspnScheduleGame,
+  EspnTeamSchedule,
   espnGameUrl,
   espnLogoUrl,
   fetchMatchupPredictor,
@@ -239,19 +240,71 @@ export function pickPreviewGame(games: TeamCardGame[], eventId?: string): TeamCa
   );
 }
 
-/** An ESPN call through the shared cache; failures return null, uncached */
-async function cachedEspn<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T | null> {
-  const hit = cacheService.get<{ value: T }>(key);
-  if (hit) return hit.value;
-  try {
-    const value = await load();
-    cacheService.set(key, { value }, ttl);
-    return value;
-  } catch (error: any) {
-    console.error(`[TeamCard] ${key} failed: ${error.message}`);
-    return null;
+/**
+ * How long a team's ESPN schedule stays cached. It only changes when a game
+ * kicks off or ends: every minute around a live game (or a kickoff that has
+ * passed without ESPN flipping to live), otherwise until the next kickoff,
+ * capped at 15 minutes.
+ */
+export function scheduleTtl(schedule: EspnTeamSchedule, now: Date = new Date()): number {
+  const live = CACHE_TTL.ESPN_SCOREBOARD;
+  let nextKickoff = Infinity;
+  for (const game of schedule.games) {
+    if (game.status === 'in_progress') return live;
+    if (game.status !== 'scheduled') continue;
+    const untilKickoff = game.startTime.getTime() - now.getTime();
+    if (untilKickoff <= 0) {
+      if (untilKickoff > -12 * 3600 * 1000) return live; // delayed start
+      continue; // a stale row from weeks ago
+    }
+    nextKickoff = Math.min(nextKickoff, untilKickoff);
   }
+  return Math.round(Math.max(live, Math.min(CACHE_TTL.TEAM_SCHEDULE, nextKickoff / 1000)));
 }
+
+// Every ESPN call the card makes goes through cachedEspn. Entries are per
+// team (or per game), never per player, so ESPN traffic tracks how many
+// teams are being looked at, not how many people are looking, and
+// concurrent requests for the same key share one call. ESPN publishes no
+// rate limits; if it ever errors or throttles, the card gets the last good
+// copy and ESPN is left alone for a minute instead of being retried per tap.
+const ESPN_BACKOFF_SECONDS = 60;
+const lastGood = new Map<string, unknown>();
+const inFlight = new Map<string, Promise<unknown>>();
+
+function cachedEspn<T>(
+  key: string,
+  ttl: number | ((value: T) => number),
+  load: () => Promise<T>
+): Promise<T | null> {
+  const hit = cacheService.get<{ value: T | null }>(key);
+  if (hit) return Promise.resolve(hit.value);
+  const pending = inFlight.get(key) as Promise<T | null> | undefined;
+  if (pending) return pending;
+
+  const request = load()
+    .then((value): T | null => {
+      cacheService.set(key, { value }, typeof ttl === 'function' ? ttl(value) : ttl);
+      lastGood.set(key, value);
+      return value;
+    })
+    .catch((error: any): T | null => {
+      const fallback = lastGood.has(key) ? (lastGood.get(key) as T) : null;
+      console.error(
+        `[TeamCard] ${key} failed (${error.message}); ${fallback === null ? 'no copy to serve' : 'serving the last good copy'}, next try in ${ESPN_BACKOFF_SECONDS}s`
+      );
+      cacheService.set(key, { value: fallback }, ESPN_BACKOFF_SECONDS);
+      return fallback;
+    })
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, request);
+  return request;
+}
+
+const predictorFor = (eventId: string) =>
+  cachedEspn(`espn:predictor:${eventId}`, CACHE_TTL.MATCHUP_PREDICTOR, () =>
+    fetchMatchupPredictor(eventId)
+  );
 
 /**
  * The card for one team in a league. `userId` picks the roster row it was
@@ -273,7 +326,7 @@ export async function getTeamCard(
   const seasonYear = league.seasonYear;
   const espnId = team.espnTeamId;
 
-  const [currentWeek, lastWeek, scoringWeeks, sos, sosOutOf, ownerRows, schedule, news] =
+  const [currentWeek, lastWeek, scoringWeeks, sos, sosOutOf, ownerRows, schedule, news, tappedPct] =
     await Promise.all([
       getCurrentWeek(seasonYear),
       getLastWeek(seasonYear),
@@ -285,12 +338,28 @@ export async function getTeamCard(
         include: { user: { select: { name: true } } },
       }),
       espnId
-        ? cachedEspn(`espn:teamSchedule:${espnId}:${seasonYear}`, CACHE_TTL.ESPN_SCOREBOARD, () =>
+        ? cachedEspn(`espn:teamSchedule:${espnId}:${seasonYear}`, scheduleTtl, () =>
             fetchTeamSchedule(espnId, seasonYear)
           )
         : null,
       espnId
         ? cachedEspn(`espn:teamNews:${espnId}`, CACHE_TTL.TEAM_NEWS, () => fetchTeamNews(espnId))
+        : null,
+      // The tapped game's predictor alongside the rest instead of after it,
+      // when its Game row confirms it's this team's game and not started
+      // (the predictor only exists before kickoff)
+      espnId && eventId && espnGameUrl(eventId)
+        ? prisma.game
+            .findUnique({
+              where: { espnEventId: eventId },
+              select: { status: true, homeTeamId: true, awayTeamId: true },
+            })
+            .then((row) =>
+              row?.status === GameStatus.SCHEDULED &&
+              (row.homeTeamId === teamId || row.awayTeamId === teamId)
+                ? predictorFor(eventId)
+                : null
+            )
         : null,
     ]);
 
@@ -303,14 +372,15 @@ export async function getTeamCard(
   const games = mergeTeamGames(teamId, scoringWeeks, schedule?.games ?? [], ownerRow);
   const preview = pickPreviewGame(games, eventId);
 
-  // ESPN's Matchup Predictor only exists before kickoff
+  // ESPN's Matchup Predictor only exists before kickoff. Usually it's the
+  // tapped game, fetched above; with no tap, or a tapped game the sync
+  // hasn't stored yet, it's fetched now.
   let predictor: TeamCard['predictor'] = null;
   if (espnId && preview?.status === 'scheduled' && preview.espnUrl) {
-    const pct = await cachedEspn(
-      `espn:predictor:${preview.espnEventId}`,
-      CACHE_TTL.MATCHUP_PREDICTOR,
-      () => fetchMatchupPredictor(preview.espnEventId)
-    );
+    const pct =
+      preview.espnEventId === eventId && tappedPct
+        ? tappedPct
+        : await predictorFor(preview.espnEventId);
     const teamPct = pct?.[espnId];
     const opponentPct = pct ? Object.entries(pct).find(([id]) => id !== espnId)?.[1] : undefined;
     if (teamPct !== undefined && opponentPct !== undefined) {

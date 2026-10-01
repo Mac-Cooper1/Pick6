@@ -52,17 +52,24 @@ turn — standing instruction from Mac)**.
   upset flag, `pointsForTeam`, scoring week, and once a row is FINAL its
   score/result too, always from the row; ESPN supplies display data, live
   scores and unsynced future games; plus ESPN team news and the pre-game
-  matchup predictor; every ESPN call is cached, time-limited and optional,
-  so an ESPN outage leaves a card built from `Game` rows), in-memory
+  matchup predictor; every ESPN call is cached per team or per game (never
+  per player: ESPN publishes no rate limits, so traffic must track teams,
+  not users), time-limited and optional: the schedule is cached until the
+  team's next kickoff (max 15 min; 60s around kickoffs and live games),
+  simultaneous requests share one call, and an ESPN error serves the last
+  good copy and backs off 60s, so an outage leaves a card built from
+  `Game` rows at worst), in-memory
   `cacheService` (cleanup timer `unref`'d so scripts can exit).
 - **Client**: React 18 + Vite + Tailwind + TanStack Query. Routes: `/` =
   marketing landing (signed-out; signed-in users bounce to `/dashboard`),
   `/login` (`?mode=signup`), `/dashboard`, `/league/create|join`,
   `/league/:id` (tabs). Tabs: Leaderboard (default) · My Team (your five +
   weekly games with kickoff/venue/network/spread) ·
-  Week by Week (grid + per-week drill-down) — tapping a My Team card or a
-  drill-down tile opens `components/TeamCard.tsx` (portaled sheet, ESPN
-  fantasy player-card style: Matchup / Game Log / Schedule / News tabs) ·
+  Week by Week (grid + per-week drill-down) — tapping a My Team card, a
+  drill-down tile or a League tab tile opens `components/TeamCard.tsx`
+  (portaled sheet, ESPN fantasy player-card style: Matchup / Season / News
+  tabs; Season = results and upcoming games in one list, right column is
+  Pick 6 points only) ·
   League (current rosters +
   spreads; `SwapBadge` marks swapped-in teams here, on My Team and in Week
   by Week) ·
@@ -136,14 +143,14 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 105 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 110 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
 swap functions take a `now` so it stays date-independent), the SOS
 tiebreaker (both directions, unranked fallback) and the swap board, double-game
 week attribution, the odds matcher and the team card (ESPN/Game-row merge,
-which game it opens on, the Game-row-only fallback: ESPN has no 2099 season,
+which game it opens on, the schedule cache timing, the Game-row-only fallback: ESPN has no 2099 season,
 so the card's end-to-end checks run exactly like an ESPN outage). It wipes/recreates its own data (league `SMOKE1`,
 `smoke1@test.local`/`smoke123`) in its **own season year 2099** with a
 copied calendar, so real Game rows synced into the local DB can never
@@ -309,4 +316,8 @@ Late Sep 30: the **team card** (tap a team on My Team / Week by Week; see
 `teamCardService` above): no migration, no Odds API calls. Local 2026 Game
 rows are weeks stale on this Mac (last synced Sep 11), so local 2026 cards
 show "·" (not scored yet) for points until a local sync runs; the smoke
-league shows real points.
+league shows real points. Same night after Mac merged it (PR #19): one
+Season tab instead of Game Log + Schedule, the League tab opens the card,
+and the speed/ESPN-safety pass on `teamCardService`'s cache. Mac OK'd two
+follow-ups for later (NOTES.md parking lot): ESLint across the repo and
+the `npm audit` findings in Render's deploy log.

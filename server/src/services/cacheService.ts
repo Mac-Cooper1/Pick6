@@ -106,6 +106,7 @@ export const CACHE_TTL = {
   ESPN_SCOREBOARD: 60, // 1 minute for live scores
   ESPN_SCHEDULE: 300, // 5 minutes for schedule
   TEAM_MATCHUPS: 300, // 5 minutes for matchup data
+  TEAM_SCHEDULE: 900, // team card schedule between games (60s around kickoffs)
   TEAM_NEWS: 900, // 15 minutes for team card headlines
   MATCHUP_PREDICTOR: 600, // 10 minutes for ESPN's pre-game win %
 } as const;

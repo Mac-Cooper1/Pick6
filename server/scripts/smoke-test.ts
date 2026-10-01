@@ -22,7 +22,7 @@ import { finalizeGames, calculateLeagueScores } from '../src/services/syncServic
 import { assignScoringWeeks, loadScoringWeekMap } from '../src/services/scoringWeekService';
 import { matchGameToOdds, teamNamesAgree } from '../src/services/teamMatcher';
 import { EspnScheduleGame, ParsedGame } from '../src/services/espnClient';
-import { getTeamCard, mergeTeamGames, pickPreviewGame } from '../src/services/teamCardService';
+import { getTeamCard, mergeTeamGames, pickPreviewGame, scheduleTtl } from '../src/services/teamCardService';
 import { ParsedOdds } from '../src/services/oddsClient';
 import { getUserRoster, getAllRosters } from '../src/services/rosterService';
 import {
@@ -980,6 +980,16 @@ async function main() {
     pickPreviewGame([...merged, { ...cgFuture, espnEventId: 'live', status: 'in_progress' }])?.espnEventId === 'live',
     'no tap → a live game beats the next one'
   );
+
+  // How long a team's ESPN schedule stays cached (Sat noon UTC)
+  const ttlNow = new Date('2026-10-03T12:00:00Z');
+  const ttlOf = (...games: EspnScheduleGame[]) =>
+    scheduleTtl({ color: null, record: null, standing: null, clubhouseUrl: null, games }, ttlNow);
+  assert(ttlOf(espnSched('a', 5, '2026-10-03T19:30:00Z')) === 900, 'schedule cache: 15 min when kickoff is hours away');
+  assert(ttlOf(espnSched('a', 5, '2026-10-03T12:05:00Z')) === 300, 'schedule cache: expires at the next kickoff');
+  assert(ttlOf(espnSched('a', 5, '2026-10-03T11:00:00Z', { status: 'in_progress' })) === 60, 'schedule cache: 60s during a live game');
+  assert(ttlOf(espnSched('a', 5, '2026-10-03T11:45:00Z')) === 60, 'schedule cache: 60s past a kickoff ESPN hasn\'t flipped to live');
+  assert(ttlOf(espnSched('a', 1, '2026-09-05T16:00:00Z', { status: 'final' })) === 900, 'schedule cache: 15 min once the season is done');
 
   // End to end on the smoke season: ESPN has nothing for 2099, so the card
   // runs on Game rows alone (the same path as an ESPN outage)

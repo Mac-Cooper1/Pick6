@@ -31,12 +31,11 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## V2 ideas
 
-- **Team card from the League tab and the Week 6 Swap board.** Sep 30 the
-  card shipped on the two tabs Mac asked for (My Team, Week by Week). It
-  takes `{ teamId, teamName, userId?, eventId?, week? }`, so another entry
-  point is a few lines. The swap board is the strongest case: scouting an
-  unowned team's game log and schedule while ranking your list (no owner
-  there, so nothing greys out).
+- **Team card from the Week 6 Swap board.** The card opens from My Team,
+  Week by Week and League (Sep 30). It takes `{ teamId, teamName, userId?,
+  eventId?, week? }`, so another entry point is a few lines. The swap board
+  is the strongest remaining case: scouting an unowned team's season while
+  ranking your list (no owner there, so nothing greys out).
 
 - **Take lines from ESPN instead of The Odds API.** ESPN's scoreboard
   response (the one the sync already fetches) embeds `competitions[0].odds`
@@ -83,6 +82,18 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
     no schema change. Not built; ask Mac before adding.
 
 ## Parking lot
+
+- **ESLint across the repo** (Mac OK'd adding it, Sep 30; saved for later).
+  The client has a `lint` script and ESLint 8 devDependencies but no config
+  file, so `npm run lint` fails; the server has neither. Expect a first
+  pass of fixes before `--max-warnings 0` can gate anything.
+- **`npm audit` findings** (Sep 30, saved for later): Render's deploy log
+  reports 13 vulnerabilities (3 moderate, 9 high, 1 critical) right before
+  `Prisma schema loaded`, i.e. the server's `npm ci` (the build runs
+  `prisma generate` next; the client's install prints its own audit summary
+  later in the same log). Read `npm audit` in both first:
+  sort runtime from dev-only packages and check what `npm audit fix` would
+  bump (a major bump can break the build) before applying anything.
 
 - **Drop the dead turn-based swap columns (2027 offseason).** The Sep 30
   week-6 swap left `League.swapStatus`, `League.swapTurnDeadline`,
