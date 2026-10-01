@@ -26,6 +26,8 @@ export default {
       },
       animation: {
         rise: 'rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both',
+        // Same motion, sized for a sheet opened by a tap (the team card)
+        sheet: 'rise 0.25s cubic-bezier(0.16, 1, 0.3, 1) both',
       },
     },
   },

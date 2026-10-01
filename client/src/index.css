@@ -62,6 +62,7 @@ code {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-rise,
+  .animate-sheet,
   .animate-pulse {
     animation: none !important;
   }
