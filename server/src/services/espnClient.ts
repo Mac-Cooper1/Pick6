@@ -170,14 +170,15 @@ export async function fetchScoreboardByDate(
 }
 
 /**
- * Fetch detailed game summary
+ * Fetch detailed game summary. `timeoutMs` bounds user-facing callers (the
+ * team card) so a slow ESPN can't hang a request.
  */
-export async function fetchGameSummary(eventId: string): Promise<any> {
+export async function fetchGameSummary(eventId: string, timeoutMs?: number): Promise<any> {
   const url = `${ESPN_BASE_URL}/summary?event=${eventId}`;
 
   console.log(`[ESPN] Fetching game summary: ${url}`);
 
-  const response = await fetch(url);
+  const response = await fetch(url, timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : undefined);
 
   if (!response.ok) {
     throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
@@ -389,6 +390,211 @@ export async function fetchSosRanks(seasonYear: number): Promise<Map<string, num
     }
   }
   return ranks;
+}
+
+// ============================================
+// TEAM CARD (team schedule, headlines, matchup predictor)
+// ============================================
+
+// The team card is a tap away for every player: a slow ESPN must fail fast
+// so the card falls back to the synced Game rows instead of hanging
+const TEAM_CARD_TIMEOUT_MS = 5000;
+
+/** ESPN's team logo, resized by their CDN (the 500px original is ~30KB) */
+export function espnLogoUrl(espnTeamId: string | null | undefined): string | null {
+  return espnTeamId
+    ? `https://a.espncdn.com/combiner/i?img=/i/teamlogos/ncaa/500/${espnTeamId}.png&w=160&h=160`
+    : null;
+}
+
+/** ESPN's game page (gamecast before kickoff, box score after) */
+export function espnGameUrl(eventId: string): string | null {
+  return /^\d+$/.test(eventId)
+    ? `https://www.espn.com/college-football/game/_/gameId/${eventId}`
+    : null;
+}
+
+export interface EspnScheduleGame {
+  espnEventId: string;
+  weekNumber: number;
+  startTime: Date;
+  timeTbd: boolean; // ESPN has the date but no kickoff time yet
+  status: ParsedGame['status'];
+  statusDetail: string | null; // ESPN's short status, e.g. "Final/OT", "Q3 4:12"
+  isHome: boolean;
+  neutralSite: boolean;
+  teamScore: number | null;
+  teamWon: boolean | null; // null until final
+  teamRank: number | null; // AP/CFP rank going into the game (null = unranked)
+  opponent: {
+    espnId: string;
+    name: string;
+    abbreviation: string | null;
+    rank: number | null;
+    record: string | null;
+  };
+  opponentScore: number | null;
+  venue: string | null;
+  broadcast: string | null;
+}
+
+export interface EspnTeamSchedule {
+  color: string | null; // hex without '#'
+  record: string | null; // overall W-L this season
+  standing: string | null; // e.g. "1st in SEC"
+  clubhouseUrl: string | null;
+  games: EspnScheduleGame[];
+}
+
+// Schedule scores are { value, displayValue }; scoreboard scores are strings
+function scheduleScore(score: any): number | null {
+  const value = typeof score === 'object' && score !== null ? score.value : parseInt(score, 10);
+  return typeof value === 'number' && !isNaN(value) ? value : null;
+}
+
+// ESPN's curatedRank: 1-25, or 99 for unranked
+function curatedRank(competitor: any): number | null {
+  const rank = competitor?.curatedRank?.current;
+  return typeof rank === 'number' && rank >= 1 && rank <= 25 ? rank : null;
+}
+
+/**
+ * One team's regular season from ESPN's team schedule: every game (played
+ * and upcoming) with live/final scores, kickoff, TV and the opponent's rank
+ * and record, plus the team's color, record and conference standing.
+ * Display data only: the stored line, upset flag and points stay in Game
+ * rows (teamCardService merges the two).
+ */
+export async function fetchTeamSchedule(
+  espnTeamId: string,
+  seasonYear: number
+): Promise<EspnTeamSchedule> {
+  const url = `${ESPN_BASE_URL}/teams/${espnTeamId}/schedule?season=${seasonYear}&seasontype=2`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(TEAM_CARD_TIMEOUT_MS) });
+  if (!response.ok) {
+    throw new Error(`ESPN team schedule error: ${response.status} ${response.statusText}`);
+  }
+
+  const data: any = await response.json();
+  const team = data.team || {};
+  // The team block always describes ESPN's current season, whatever season
+  // was asked for: only trust its record for the requested one
+  const sameSeason = String(team.seasonSummary || '') === String(seasonYear);
+
+  const games: EspnScheduleGame[] = [];
+  for (const event of data.events || []) {
+    if (event.season?.year !== undefined && event.season.year !== seasonYear) continue;
+    const competition = event.competitions?.[0];
+    const competitors: any[] = competition?.competitors || [];
+    const me = competitors.find((c) => String(c.team?.id) === espnTeamId);
+    const opp = competitors.find((c) => c !== me);
+    if (!competition || !me || !opp) continue;
+
+    const type = competition.status?.type || {};
+    const name = String(type.name || '').toLowerCase();
+    let status: ParsedGame['status'] = 'scheduled';
+    if (name.includes('postponed')) status = 'postponed';
+    else if (name.includes('canceled') || name.includes('cancelled')) status = 'cancelled';
+    else if (type.state === 'post' || type.completed) status = 'final';
+    else if (type.state === 'in') status = 'in_progress';
+
+    const scored = status === 'final' || status === 'in_progress';
+    const broadcast = competition.broadcasts?.[0];
+
+    games.push({
+      espnEventId: String(event.id),
+      weekNumber: event.week?.number ?? 0,
+      startTime: new Date(event.date),
+      timeTbd: event.timeValid === false,
+      status,
+      statusDetail: type.shortDetail || null,
+      isHome: me.homeAway === 'home',
+      neutralSite: competition.neutralSite === true,
+      teamScore: scored ? scheduleScore(me.score) : null,
+      teamWon: status === 'final' && (me.winner === true || opp.winner === true) ? me.winner === true : null,
+      teamRank: curatedRank(me),
+      opponent: {
+        espnId: String(opp.team?.id ?? ''),
+        name: opp.team?.location || opp.team?.shortDisplayName || opp.team?.displayName || 'TBD',
+        abbreviation: opp.team?.abbreviation || null,
+        rank: curatedRank(opp),
+        record: (opp.record || []).find((r: any) => r.type === 'total')?.displayValue || null,
+      },
+      opponentScore: scored ? scheduleScore(opp.score) : null,
+      venue: competition.venue?.fullName || null,
+      broadcast: broadcast?.media?.shortName || broadcast?.names?.[0] || null,
+    });
+  }
+
+  return {
+    color: /^[0-9a-f]{6}$/i.test(team.color || '') ? team.color : null,
+    record: sameSeason ? team.recordSummary || null : null,
+    standing: sameSeason ? team.standingSummary || null : null,
+    clubhouseUrl: team.clubhouse || null,
+    games,
+  };
+}
+
+export interface EspnHeadline {
+  headline: string;
+  url: string;
+  published: string; // ISO timestamp
+  type: string; // Story, HeadlineNews, Recap, Preview or Media (video)
+}
+
+const HEADLINE_TYPES = new Set(['Story', 'HeadlineNews', 'Recap', 'Preview', 'Media']);
+
+/**
+ * A team's latest ESPN headlines, newest first. The team feed mixes in
+ * league-wide roundups (Bubble Watch, Power Rankings) tagged with dozens of
+ * teams, so stories about this team (4 or fewer teams tagged) win whenever
+ * there are enough of them.
+ */
+export async function fetchTeamNews(espnTeamId: string, limit = 6): Promise<EspnHeadline[]> {
+  const url = `${ESPN_BASE_URL}/news?team=${espnTeamId}&limit=40`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(TEAM_CARD_TIMEOUT_MS) });
+  if (!response.ok) {
+    throw new Error(`ESPN news error: ${response.status} ${response.statusText}`);
+  }
+
+  const data: any = await response.json();
+  const tagged = (data.articles || [])
+    .map((article: any) => ({
+      article,
+      teams: new Set(
+        (article.categories || [])
+          .filter((c: any) => c.type === 'team')
+          .map((c: any) => String(c.teamId ?? c.team?.id ?? ''))
+      ),
+      href: article.links?.web?.href as string | undefined,
+    }))
+    .filter(
+      ({ article, teams, href }: any) =>
+        HEADLINE_TYPES.has(article.type) && article.headline && href && teams.has(espnTeamId)
+    )
+    .sort((a: any, b: any) => String(b.article.published).localeCompare(String(a.article.published)));
+
+  const aboutTeam = tagged.filter(({ teams }: any) => teams.size <= 4);
+  return (aboutTeam.length >= 3 ? aboutTeam : tagged).slice(0, limit).map(({ article, href }: any) => ({
+    headline: article.headline,
+    url: href!.replace(/^http:\/\//, 'https://'),
+    published: article.published,
+    type: article.type,
+  }));
+}
+
+/**
+ * ESPN's Matchup Predictor (pre-game win %, keyed by ESPN team id), from
+ * the game summary. null after kickoff or when ESPN has none (FCS games).
+ */
+export async function fetchMatchupPredictor(eventId: string): Promise<Record<string, number> | null> {
+  const summary = await fetchGameSummary(eventId, TEAM_CARD_TIMEOUT_MS);
+  const pct: Record<string, number> = {};
+  for (const side of [summary?.predictor?.homeTeam, summary?.predictor?.awayTeam]) {
+    const value = parseFloat(side?.gameProjection);
+    if (side?.id && !isNaN(value)) pct[String(side.id)] = value;
+  }
+  return Object.keys(pct).length === 2 ? pct : null;
 }
 
 // ============================================

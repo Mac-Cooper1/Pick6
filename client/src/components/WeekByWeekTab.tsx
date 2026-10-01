@@ -1,6 +1,7 @@
 /**
  * Week by Week — every player × every week in one grid, with a per-team
  * drill-down for the selected week (result, score, spread, upset badge).
+ * Tapping a team in the drill-down opens its TeamCard on that week's game.
  */
 
 import React, { useState } from 'react';
@@ -10,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { SwapBadge } from './SwapBadge';
+import { TeamCard, TeamCardTarget } from './TeamCard';
 
 interface WeekByWeekTabProps {
   leagueId: number;
@@ -50,6 +52,7 @@ function resultBadge(team: WeekDetailTeam) {
 export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
   const { user } = useAuth();
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
+  const [cardTarget, setCardTarget] = useState<TeamCardTarget | null>(null);
 
   const { data: grid, isLoading, error } = useQuery({
     queryKey: ['seasonGrid', leagueId],
@@ -153,7 +156,7 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
             <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">
               Week {week}
             </h3>
-            <span className="text-sm text-gray-500">game by game</span>
+            <span className="text-sm text-gray-500">game by game. Tap a team for its season.</span>
             {detail === undefined && <span className="text-gray-400 text-sm ml-auto">loading</span>}
           </div>
           {detail && (
@@ -173,7 +176,20 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
                     {/* A team can appear twice: ESPN's Week 1 is two weekends */}
                     {member.teams.map((team, i) => (
-                      <div key={`${team.teamId}-${i}`} className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-xs">
+                      <button
+                        key={`${team.teamId}-${i}`}
+                        type="button"
+                        onClick={() =>
+                          setCardTarget({
+                            teamId: team.teamId,
+                            teamName: team.teamName,
+                            userId: member.userId,
+                            eventId: team.espnEventId,
+                            week,
+                          })
+                        }
+                        className="block w-full text-left bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-xs transition-colors hover:border-green-600 hover:bg-white active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600"
+                      >
                         <div className="label text-[11px] mb-0.5">
                           {team.slotLabel}
                           {team.playedWeek !== null && team.playedWeek !== week && (
@@ -209,7 +225,7 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
                             </span>
                           </div>
                         )}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -217,6 +233,10 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
             </div>
           )}
         </div>
+      )}
+
+      {cardTarget && (
+        <TeamCard leagueId={leagueId} target={cardTarget} onClose={() => setCardTarget(null)} />
       )}
     </div>
   );

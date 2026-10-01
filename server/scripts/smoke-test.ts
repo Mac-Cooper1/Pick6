@@ -19,9 +19,10 @@ import {
   DRAFT_SLOTS,
 } from '../src/services/draftService';
 import { finalizeGames, calculateLeagueScores } from '../src/services/syncService';
-import { assignScoringWeeks } from '../src/services/scoringWeekService';
+import { assignScoringWeeks, loadScoringWeekMap } from '../src/services/scoringWeekService';
 import { matchGameToOdds, teamNamesAgree } from '../src/services/teamMatcher';
-import { ParsedGame } from '../src/services/espnClient';
+import { EspnScheduleGame, ParsedGame } from '../src/services/espnClient';
+import { getTeamCard, mergeTeamGames, pickPreviewGame } from '../src/services/teamCardService';
 import { ParsedOdds } from '../src/services/oddsClient';
 import { getUserRoster, getAllRosters } from '../src/services/rosterService';
 import {
@@ -915,6 +916,91 @@ async function main() {
     assert(teamNamesAgree(espn, odds), `${espn} ↔ ${odds}`);
   }
   assert(!teamNamesAgree('App State Mountaineers', 'West Virginia Mountaineers'), 'App State ≠ West Virginia (shared mascot)');
+
+  // ---------- Team card (tap a team on My Team / Week by Week) ----------
+  console.log('— Team card');
+  const espnSched = (
+    espnEventId: string,
+    weekNumber: number,
+    startTime: string,
+    extra: Partial<EspnScheduleGame> = {}
+  ): EspnScheduleGame => ({
+    espnEventId,
+    weekNumber,
+    startTime: new Date(startTime),
+    timeTbd: false,
+    status: 'scheduled',
+    statusDetail: null,
+    isHome: true,
+    neutralSite: false,
+    teamScore: null,
+    teamWon: null,
+    teamRank: null,
+    opponent: { espnId: '0', name: 'Opponent', abbreviation: null, rank: null, record: null },
+    opponentScore: null,
+    venue: null,
+    broadcast: null,
+    ...extra,
+  });
+  // Alice's SEC team: smoke-g1 (wk 1, -7, won 35-10), smoke-g7 (wk 1, no
+  // line, won), smoke-g8 (wk 2, scheduled). ESPN's list here disagrees on g1
+  // (as after a commissioner override), lacks g7, calls g8 final before the
+  // sync has, and adds an unsynced week-9 game.
+  const merged = mergeTeamGames(
+    aliceSec.teamId,
+    await loadScoringWeekMap(SMOKE_SEASON, [aliceSec.teamId]),
+    [
+      espnSched('smoke-g1', 1, '2026-09-05T16:00:00Z', { status: 'final', teamWon: false, teamScore: 10, opponentScore: 35 }),
+      espnSched('smoke-g8', 2, '2026-09-12T20:00:00Z', { status: 'final', teamWon: true, teamScore: 14, opponentScore: 7 }),
+      espnSched('401999999', 9, '2026-10-31T19:30:00Z'),
+    ],
+    { fromWeek: 2, toWeek: null }
+  );
+  const cardGame = new Map(merged.map((g) => [g.espnEventId, g]));
+  const [cg1, cg7, cg8, cgFuture] = ['smoke-g1', 'smoke-g7', 'smoke-g8', '401999999'].map((id) => cardGame.get(id)!);
+  assert(
+    merged.map((g) => g.espnEventId).join() === 'smoke-g1,smoke-g7,smoke-g8,401999999',
+    'card: ESPN schedule plus the Game rows it lacks, kickoff order'
+  );
+  assert(cg1.teamSpread === -7 && cg1.points === 1, 'card: stored line and points come from the Game row');
+  assert(
+    cg1.result === 'W' && cg1.teamScore === 35 && cg1.opponentScore === 10,
+    'card: a final Game row beats ESPN on score and result (matches the points)'
+  );
+  assert(cg7.points === 1 && cg7.week === 1, 'card: a synced game missing from ESPN still shows, scored');
+  assert(cg8.result === 'W' && cg8.points === null, 'card: ESPN final before the sync → no points yet');
+  assert(
+    cgFuture.week === 9 && cgFuture.points === null && cgFuture.espnUrl?.endsWith('/gameId/401999999') === true,
+    'card: an unsynced future game rides on ESPN alone'
+  );
+  assert(!cg1.counted && !cg7.counted && cg8.counted && cgFuture.counted, 'card: games outside the owner window are flagged');
+  assert(pickPreviewGame(merged, 'smoke-g7') === cg7, 'card opens on the tapped game');
+  assert(pickPreviewGame(merged) === cgFuture, 'no tap → the next scheduled game');
+  assert(
+    pickPreviewGame([...merged, { ...cgFuture, espnEventId: 'live', status: 'in_progress' }])?.espnEventId === 'live',
+    'no tap → a live game beats the next one'
+  );
+
+  // End to end on the smoke season: ESPN has nothing for 2099, so the card
+  // runs on Game rows alone (the same path as an ESPN outage)
+  const secCard = await getTeamCard(league.id, aliceSec.teamId, { userId: alice.id });
+  assert(
+    secCard?.owner?.userId === alice.id && secCard.pick6.points === 2 && secCard.pick6.ownerPoints === 2,
+    `card: Alice owns it, 2 Pick 6 points (got ${secCard?.pick6.points}/${secCard?.pick6.ownerPoints})`
+  );
+  assert(
+    secCard?.games.length === 3 && secCard.previewEventId === 'smoke-g8',
+    'card without ESPN runs on Game rows and opens on the next game'
+  );
+  const tappedCard = await getTeamCard(league.id, aliceSec.teamId, { eventId: 'smoke-g1', userId: alice.id });
+  assert(tappedCard?.previewEventId === 'smoke-g1', 'card opens on the tapped event');
+  const awayCard = await getTeamCard(league.id, bobRoster[1].teamId);
+  const awayG2 = awayCard?.games.find((g) => g.espnEventId === 'smoke-g2');
+  assert(
+    awayG2?.teamSpread === -7 && awayG2.wasUpset && awayG2.points === -1,
+    'card from the away side: line flips to -7, favorite lost → -1'
+  );
+  assert((await getTeamCard(league.id, 999999)) === null, 'unknown team → null (404)');
 
   // ---------- Summary ----------
   console.log(`\n${failed === 0 ? '🎉' : '💥'} ${passed} passed, ${failed} failed`);

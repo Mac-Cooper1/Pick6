@@ -6,6 +6,7 @@ import {
   getAvailableTeamsEndpoint,
   getMyMatchups,
   getAllMatchups,
+  getTeamCardEndpoint,
 } from '../controllers/rosterController';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
@@ -21,5 +22,8 @@ router.get('/:leagueId/available', authenticate, asyncHandler(getAvailableTeamsE
 // Matchup endpoints (with odds)
 router.get('/:leagueId/matchups', authenticate, asyncHandler(getMyMatchups));
 router.get('/:leagueId/matchups/all', authenticate, asyncHandler(getAllMatchups));
+
+// Team card: one team's season, schedule and headlines
+router.get('/:leagueId/teams/:teamId', authenticate, asyncHandler(getTeamCardEndpoint));
 
 export default router;

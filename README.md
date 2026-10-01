@@ -39,6 +39,7 @@ Smaller spreads and pick'ems score as regular results.
 - **Live snake draft**: Socket.IO rooms, server-time countdown clock, scheduled auto-start with a pre-draft lobby (order, presence, queue building), slot-aware pick validation, draft queue with AP-rank autopick fallback
 - **Draft order**: assigned when the draft is scheduled — random or set manually by the commissioner in Settings — and visible in the lobby before the first pick
 - **My Team**: your five teams with this week's game each — opponent, kickoff, venue, TV network (from ESPN), and the stored spread with what it means for scoring
+- **Team card**: tap a team on My Team or Week by Week for its season, ESPN fantasy player-card style: the tapped game (preview with ESPN's matchup predictor, live, or final), a game log with each game's Pick 6 points, the rest of the schedule with byes, ESPN headlines, record, rank and FPI SOS rank
 - **Week 6 Swap tab**: every unowned team sorted by Pick 6 points this season (slot filters, your own team in that slot for comparison, one-tap Add), your ranked swap list, the projected order with the tiebreaker, and a recap of how the swap went after the run; swapped-in teams carry a "Week 6 Swap" badge on My Team, Week by Week and League
 - **Standings tiebreaker**: ESPN FPI strength of schedule, refreshed on every scheduled sync; one ordering (`standingsService`) drives the Leaderboard, Week by Week, the dashboard rank and the swap order
 - **Settings** opens from the header button (Log out lives in Settings; the dashboard, which has no settings page, keeps Log out in its header)
@@ -52,7 +53,7 @@ Smaller spreads and pick'ems score as regular results.
 
 **Frontend**: React 18 + TypeScript, Vite, Tailwind, React Router, TanStack Query, socket.io-client, Phosphor icons, self-hosted Barlow / Barlow Condensed (`@fontsource`)
 **Backend**: Node/Express + TypeScript, Prisma + PostgreSQL, Socket.IO, JWT + bcrypt
-**Data**: ESPN hidden API (scores, schedules, rankings, season calendar, team/conference membership, FPI strength of schedule) + The Odds API (spreads; 500 credits/mo free tier — only the sync pipeline spends them, ~1 credit per cron run; user traffic reads spreads from the DB)
+**Data**: ESPN hidden API (scores, schedules, rankings, season calendar, team/conference membership, FPI strength of schedule; team schedules, team news and the matchup predictor for the team card) + The Odds API (spreads; 500 credits/mo free tier — only the sync pipeline spends them, ~1 credit per cron run; user traffic reads spreads from the DB)
 
 ## Getting Started (local)
 
@@ -124,7 +125,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 | Leagues | `GET /my` · `POST /create` · `POST /join` (code only) · `GET /:id` · `GET /:id/members` · `PATCH /:id/settings` |
 | Week-6 swap | `GET /leagues/:id/swap` (phase, lock time, order with tiebreak SOS, your list, results) · `GET /leagues/:id/swap/teams` (unowned teams by Pick 6 points + your five) · `PUT /leagues/:id/swap/claims` (replace your ranked list while lists are open) — the run itself happens in the scheduled sync |
 | Draft | `GET /:id/picks` · `GET /:id/available` · `GET /:id/state` · `POST /:id/start` (commissioner) · queue CRUD — live picks go over Socket.IO |
-| Rosters | `GET /:id` · `GET /:id/my` · `GET /:id/user/:userId` · `GET /:id/available` · `GET /:id/matchups[/all]` |
+| Rosters | `GET /:id` · `GET /:id/my` · `GET /:id/user/:userId` · `GET /:id/available` · `GET /:id/matchups[/all]` · `GET /:id/teams/:teamId[?event=&userId=]` (team card: games with lines and Pick 6 points, schedule, ESPN headlines, SOS) |
 | Standings | `GET /:id/week/:n` · `GET /:id/overall` |
 | Admin | `POST /sync-current` · `POST /sync-calendar/:year` · `POST /sync-week/:id/:n` · `POST /sync-games\|sync-odds\|finalize-games\|sync-all-leagues` · `POST /game-override` · `POST /repair-spreads/:year/:n[?apply=true]` (stored lines vs ESPN's closing line; dry run unless applied) · `POST /reset-password` · read-only previews |
 | CFB | scoreboard, schedule, AP rankings (cached 60s–1h) |
@@ -138,7 +139,7 @@ pick6/
 ├── server/src/
 │   ├── controllers/       # auth, leagues, draft, rosters, standings, admin
 │   ├── services/          # draft, roster, sync (ESPN+odds pipeline), season calendar,
-│   │                      # week-6 swap, matchups, teamMatcher, cache
+│   │                      # week-6 swap, matchups, team card, teamMatcher, cache
 │   ├── socket/            # live draft room
 │   ├── middleware/        # JWT auth, admin gate, error handler
 │   └── lib/, utils/, types/
@@ -168,6 +169,13 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Sep 30, 2026 (late night)** — Team card: tap a team for its season (Mac's request, modeled on ESPN fantasy's player card, minus the roster moves):
+- **Where**: every slot card on My Team (yours or any member's) and every team tile in Week by Week's drill-down opens a team card, a bottom sheet on phones and a dialog on desktop. It opens on the game you tapped (a Week by Week tile opens on that week's game; a bye tile says "Off in week N" and shows the next game). Escape, the ×, or tapping outside closes it
+- **What's on it**: a header in the team's ESPN color (logo, rank, conference standing, whose team it is, with "from week 6" / "through week 5" for swap teams), a stat strip (the team's Pick 6 points this season, record, Top 25 rank, ESPN FPI SOS rank of 138) and four tabs. **Matchup**: preview, live or final; both teams with ranks and records, kickoff, venue, TV, the stored line and what it means, "At stake: Win +1 · Loss -1" before kickoff or the points it earned after, ESPN's matchup predictor (win %) before kickoff, and a link to ESPN's game page. **Game Log**: every played game with the same W / Upset W / L / Bust L chips as Week by Week, the score, the line and its Pick 6 points; byes show 0; games outside the owner's roster window (the swap) are greyed and say so. **Schedule**: the rest of the season including bye weeks, kickoff (or "time TBD"), TV, and the stored line once posted. **News**: ESPN's team feed, newest six headlines, stories about the team preferred over league-wide roundups, each linking to the article. Tapping a game in the log or schedule shows it on Matchup
+- **Data**: new `GET /api/rosters/:id/teams/:teamId?event=&userId=` (`teamCardService`). Scoring truth stays in Game rows (stored line, upset flag, `pointsForTeam`, scoring-week attribution), and a final Game row also supplies the score and result, so a commissioner override shows through. Display data comes from free ESPN calls cached in memory (team schedule 60s, news 15 min, predictor 10 min; 5s timeouts); if ESPN is down the card runs on the synced Game rows. No Odds API traffic (lines are the stored ones) and no migration. Week by Week's drill-down now also returns each game's `espnEventId`
+- Along the way: `cacheService`'s cleanup timer is `unref`'d (any script that loads it, like the smoke test now, would otherwise never exit) and `fetchGameSummary` takes an optional timeout
+- Verified: smoke test **105** (15 new: ESPN + Game row merge order, a final row beating ESPN, ESPN-final-before-sync showing no points yet, ESPN-only future games, owner-window flags, which game the card opens on, the Game-row-only fallback end to end, the away-side line flip, unknown team); `tsc` + `vite build` green; the endpoint's 401/400/403/404 paths probed; cards driven in the browser at 1280 and 375 widths against live ESPN data (local league 10) and the smoke league
 
 **Sep 30, 2026 (night)** — Week 6 Swap badges and the post-run recap (Mac):
 - **"Week 6 Swap" badge** (new `SwapBadge`: amber pill with a swap icon) on every team added in the swap: My Team cards (replacing the small "wk 6+" label), the Week by Week drill-down (weeks 6+; week 5 and earlier still show the team it replaced) and the League tab. A team counts as swapped in when its roster row starts after week 1

@@ -46,13 +46,24 @@ turn — standing instruction from Mac)**.
   ±3.5 threshold), `espnClient`, `oddsClient`, `matchupService` (League tab
   matchups — reads spreads from `Game` rows by `espnEventId`, **never** the
   live Odds API: 500 free credits/month, only the sync pipeline may spend
-  them), in-memory `cacheService`.
+  them), `teamCardService` (Sep 30: the team card behind
+  `GET /rosters/:id/teams/:teamId`; merges ESPN's team schedule with the
+  team's `Game` rows by `espnEventId`: scoring truth, i.e. stored line,
+  upset flag, `pointsForTeam`, scoring week, and once a row is FINAL its
+  score/result too, always from the row; ESPN supplies display data, live
+  scores and unsynced future games; plus ESPN team news and the pre-game
+  matchup predictor; every ESPN call is cached, time-limited and optional,
+  so an ESPN outage leaves a card built from `Game` rows), in-memory
+  `cacheService` (cleanup timer `unref`'d so scripts can exit).
 - **Client**: React 18 + Vite + Tailwind + TanStack Query. Routes: `/` =
   marketing landing (signed-out; signed-in users bounce to `/dashboard`),
   `/login` (`?mode=signup`), `/dashboard`, `/league/create|join`,
   `/league/:id` (tabs). Tabs: Leaderboard (default) · My Team (your five +
   weekly games with kickoff/venue/network/spread) ·
-  Week by Week (grid + per-week drill-down) · League (current rosters +
+  Week by Week (grid + per-week drill-down) — tapping a My Team card or a
+  drill-down tile opens `components/TeamCard.tsx` (portaled sheet, ESPN
+  fantasy player-card style: Matchup / Game Log / Schedule / News tabs) ·
+  League (current rosters +
   spreads; `SwapBadge` marks swapped-in teams here, on My Team and in Week
   by Week) ·
   Draft (live room) · Week 6 Swap (`SwapTab`: board of unowned teams by
@@ -125,13 +136,15 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 90 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 105 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
 swap functions take a `now` so it stays date-independent), the SOS
 tiebreaker (both directions, unranked fallback) and the swap board, double-game
-week attribution and the odds matcher. It wipes/recreates its own data (league `SMOKE1`,
+week attribution, the odds matcher and the team card (ESPN/Game-row merge,
+which game it opens on, the Game-row-only fallback: ESPN has no 2099 season,
+so the card's end-to-end checks run exactly like an ESPN outage). It wipes/recreates its own data (league `SMOKE1`,
 `smoke1@test.local`/`smoke123`) in its **own season year 2099** with a
 copied calendar, so real Game rows synced into the local DB can never
 collide with its synthetic games — **never point it at prod**. Before ending a turn: `npx tsc` in `server/`, `npm run build` in
@@ -185,7 +198,16 @@ connects. Tabs are component state, not routes — click the button by label.
   (returns D3 schools); conference membership needs the core API. There is
   no "Week 0" — ESPN's Week 1 spans the late-Aug openers through Labor Day.
   Never compute week boundaries; read `SeasonWeek`. Scoreboard `limit=300`
-  (Week 1 2026 has 104 games; the old 100 truncated).
+  (Week 1 2026 has 104 games; the old 100 truncated). Team schedule
+  (`/teams/{id}/schedule?season=&seasontype=2`): its `team` block always
+  describes ESPN's *current* season whatever season you ask for (trust its
+  record only when `seasonSummary` matches), scores are `{value,
+  displayValue}` objects (scoreboard: strings), `curatedRank.current` 99 =
+  unranked, `timeValid: false` = kickoff TBD (the 04:00Z/05:00Z placeholder
+  times are not real). Team news (`/news?team={id}`) mixes in league-wide
+  roundups tagged with 20-70 teams; the card prefers stories tagging 4 or
+  fewer. Logos: `a.espncdn.com/combiner/i?img=/i/teamlogos/ncaa/500/{id}.png&w=160&h=160`
+  (resized by ESPN's CDN: 8-16KB vs ~30KB for the 500px original).
 - Vercel is retired (Aug 5) — don't suggest it. Old service
   `pick6-r5q0.onrender.com` was a pre-rebuild corpse; the blueprint service
   replaced it.
@@ -283,3 +305,8 @@ columns are dead but kept for rollback safety until the offseason. Same day,
 after Mac's review: the swap got its own tab (board sorted by Pick 6 season
 points), Settings moved behind a header button, and standings got a
 tiebreaker (combined ESPN FPI SOS rank, `TeamSos` + `standingsService`).
+Late Sep 30: the **team card** (tap a team on My Team / Week by Week; see
+`teamCardService` above): no migration, no Odds API calls. Local 2026 Game
+rows are weeks stale on this Mac (last synced Sep 11), so local 2026 cards
+show "·" (not scored yet) for points until a local sync runs; the smoke
+league shows real points.

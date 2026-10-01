@@ -1,0 +1,369 @@
+/**
+ * Team Card Service
+ *
+ * Tap a team on My Team or Week by Week and a card opens with that team's
+ * season: the tapped game (preview, live or final), a game log with each
+ * game's Pick 6 points, the rest of the schedule, ESPN headlines and the
+ * FPI strength-of-schedule rank.
+ *
+ * Two sources, split on purpose:
+ *  - Scoring truth comes from Game rows: the stored line (never the live
+ *    Odds API), the upset flag, and Pick 6 points through the one
+ *    pointsForTeam formula, attributed to scoring weeks by
+ *    scoringWeekService (FSU's rolled-forward game sits in week 2).
+ *  - Display data comes from ESPN's team schedule and news feed (one cached
+ *    request each): kickoff/TV, live scores, games past the synced weeks,
+ *    opponents' ranks and records, headlines.
+ * If ESPN fails the card falls back to the synced Game rows; it never errors.
+ */
+
+import prisma from '../lib/prisma';
+import { ConferenceSlot, GameStatus } from '@prisma/client';
+import cacheService, { CACHE_TTL } from './cacheService';
+import { SLOT_LABELS } from './draftService';
+import {
+  EspnHeadline,
+  EspnScheduleGame,
+  espnGameUrl,
+  espnLogoUrl,
+  fetchMatchupPredictor,
+  fetchTeamNews,
+  fetchTeamSchedule,
+  ParsedGame,
+} from './espnClient';
+import { gameRowStatus } from './matchupService';
+import { getCurrentWeek } from './seasonService';
+import {
+  getLastWeek,
+  loadScoringWeekMap,
+  pointsForTeam,
+  ScoredGame,
+  ScoringWeekMap,
+  seasonRecord,
+} from './scoringWeekService';
+
+export interface TeamCardGame {
+  espnEventId: string;
+  week: number; // the Pick 6 week it counts in
+  playedWeek: number; // ESPN week; differs when a double-game rolled forward
+  startTime: Date;
+  timeTbd: boolean;
+  status: ParsedGame['status'];
+  statusDetail: string | null;
+  isHome: boolean;
+  neutralSite: boolean;
+  teamRank: number | null; // AP/CFP rank going into the game
+  opponent: {
+    name: string;
+    abbreviation: string | null;
+    logo: string | null;
+    rank: number | null;
+    record: string | null;
+  };
+  teamScore: number | null;
+  opponentScore: number | null;
+  result: 'W' | 'L' | null;
+  teamSpread: number | null; // stored line, team-relative (+ = underdog)
+  wasUpset: boolean;
+  points: number | null; // null until the Game row is FINAL
+  counted: boolean; // false = outside the owner's roster window (the swap)
+  venue: string | null;
+  broadcast: string | null;
+  espnUrl: string | null;
+}
+
+export interface TeamCard {
+  seasonYear: number;
+  currentWeek: number;
+  lastWeek: number;
+  team: {
+    teamId: number;
+    name: string;
+    abbreviation: string | null;
+    conference: string;
+    slot: ConferenceSlot;
+    slotLabel: string;
+    logo: string | null;
+    color: string | null; // ESPN hex, no '#'
+    record: string | null;
+    standing: string | null;
+    apRank: number | null;
+    sosRank: number | null; // ESPN FPI strength of schedule, 1 = hardest
+    sosOutOf: number | null;
+    espnUrl: string | null;
+  };
+  // The roster row the card was opened from (null = nobody in this league)
+  owner: { userId: number; userName: string; fromWeek: number; toWeek: number | null } | null;
+  pick6: {
+    points: number; // every game this season, whoever owned the team
+    wins: number;
+    losses: number;
+    ownerPoints: number | null; // only the games inside the owner's window
+  };
+  games: TeamCardGame[]; // the whole season, kickoff order
+  previewEventId: string | null;
+  predictor: { teamWinPct: number; opponentWinPct: number } | null;
+  news: EspnHeadline[];
+}
+
+interface OwnerWindow {
+  fromWeek: number;
+  toWeek: number | null;
+}
+
+/** Stored line, upset flag and Pick 6 points: Game rows only */
+function scoringFields(game: ScoredGame | undefined, teamId: number) {
+  if (!game) return { teamSpread: null, wasUpset: false, points: null };
+  const isHome = game.homeTeamId === teamId;
+  return {
+    teamSpread: game.spread !== null ? (isHome ? game.spread : -game.spread) : null,
+    wasUpset: game.wasUpset,
+    points: game.status === GameStatus.FINAL ? pointsForTeam(game, teamId) : null,
+  };
+}
+
+/**
+ * One list for the team's season: every ESPN schedule game with the
+ * scoring truth from its Game row where one is synced, plus any synced game
+ * ESPN's list lacks (ESPN down: the card runs on Game rows alone).
+ */
+export function mergeTeamGames(
+  teamId: number,
+  scoringWeeks: ScoringWeekMap,
+  espnGames: EspnScheduleGame[],
+  window: OwnerWindow | null
+): TeamCardGame[] {
+  const rows = new Map<string, { game: ScoredGame; week: number }>();
+  for (const [week, games] of scoringWeeks.get(teamId) ?? []) {
+    for (const game of games) rows.set(game.espnEventId, { game, week });
+  }
+  const counted = (week: number) =>
+    window === null ||
+    (week >= window.fromWeek && (window.toWeek === null || week <= window.toWeek));
+
+  const merged: TeamCardGame[] = espnGames.map((espn) => {
+    const row = rows.get(espn.espnEventId);
+    const week = row?.week ?? espn.weekNumber;
+    // A FINAL row is the truth (a commissioner override included), so its
+    // score and result match the points; until then ESPN is fresher (live
+    // scores, finals the sync hasn't picked up yet)
+    const settled = row?.game.status === GameStatus.FINAL ? row.game : undefined;
+    const settledHome = settled?.homeTeamId === teamId;
+    const won = settled
+      ? settled.winnerTeamId ? settled.winnerTeamId === teamId : null
+      : espn.teamWon;
+    return {
+      espnEventId: espn.espnEventId,
+      week,
+      playedWeek: row?.game.weekNumber ?? espn.weekNumber,
+      startTime: espn.startTime,
+      timeTbd: espn.timeTbd,
+      status: settled ? 'final' : espn.status,
+      statusDetail: settled && espn.status !== 'final' ? null : espn.statusDetail,
+      isHome: espn.isHome,
+      neutralSite: espn.neutralSite,
+      teamRank: espn.teamRank,
+      opponent: {
+        name: espn.opponent.name,
+        abbreviation: espn.opponent.abbreviation,
+        logo: espnLogoUrl(espn.opponent.espnId),
+        rank: espn.opponent.rank,
+        record: espn.opponent.record,
+      },
+      teamScore: settled ? (settledHome ? settled.homeScore : settled.awayScore) : espn.teamScore,
+      opponentScore: settled ? (settledHome ? settled.awayScore : settled.homeScore) : espn.opponentScore,
+      result: won === null ? null : won ? 'W' : 'L',
+      ...scoringFields(row?.game, teamId),
+      counted: counted(week),
+      venue: espn.venue ?? row?.game.venue ?? null,
+      broadcast: espn.broadcast,
+      espnUrl: espnGameUrl(espn.espnEventId),
+    };
+  });
+
+  const fromEspn = new Set(espnGames.map((g) => g.espnEventId));
+  for (const [eventId, { game, week }] of rows) {
+    if (fromEspn.has(eventId)) continue;
+    const isHome = game.homeTeamId === teamId;
+    const opponent = isHome ? game.awayTeam : game.homeTeam;
+    const scored = game.status === GameStatus.FINAL || game.status === GameStatus.IN_PROGRESS;
+    merged.push({
+      espnEventId: eventId,
+      week,
+      playedWeek: game.weekNumber,
+      startTime: game.startTime,
+      timeTbd: false,
+      status: gameRowStatus(game.status),
+      statusDetail: null,
+      isHome,
+      neutralSite: false,
+      teamRank: null,
+      opponent: {
+        name: opponent.name,
+        abbreviation: opponent.abbreviation,
+        logo: espnLogoUrl(opponent.espnTeamId),
+        rank: null,
+        record: null,
+      },
+      teamScore: scored ? (isHome ? game.homeScore : game.awayScore) : null,
+      opponentScore: scored ? (isHome ? game.awayScore : game.homeScore) : null,
+      result:
+        game.status === GameStatus.FINAL && game.winnerTeamId
+          ? game.winnerTeamId === teamId
+            ? 'W'
+            : 'L'
+          : null,
+      ...scoringFields(game, teamId),
+      counted: counted(week),
+      venue: game.venue,
+      broadcast: null,
+      espnUrl: espnGameUrl(eventId),
+    });
+  }
+
+  return merged.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+}
+
+/**
+ * The game the card opens on: the tapped one, else the team's live game,
+ * else its next game, else its last one
+ */
+export function pickPreviewGame(games: TeamCardGame[], eventId?: string): TeamCardGame | null {
+  const tapped = eventId ? games.find((g) => g.espnEventId === eventId) : undefined;
+  return (
+    tapped ??
+    games.find((g) => g.status === 'in_progress') ??
+    games.find((g) => g.status === 'scheduled' || g.status === 'postponed') ??
+    games[games.length - 1] ??
+    null
+  );
+}
+
+/** An ESPN call through the shared cache; failures return null, uncached */
+async function cachedEspn<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T | null> {
+  const hit = cacheService.get<{ value: T }>(key);
+  if (hit) return hit.value;
+  try {
+    const value = await load();
+    cacheService.set(key, { value }, ttl);
+    return value;
+  } catch (error: any) {
+    console.error(`[TeamCard] ${key} failed: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * The card for one team in a league. `userId` picks the roster row it was
+ * opened from (a member's team); without it, the team's current owner.
+ * Returns null for an unknown team.
+ */
+export async function getTeamCard(
+  leagueId: number,
+  teamId: number,
+  { eventId, userId }: { eventId?: string; userId?: number } = {}
+): Promise<TeamCard | null> {
+  const [league, team] = await Promise.all([
+    prisma.league.findUnique({ where: { id: leagueId } }),
+    prisma.team.findUnique({ where: { id: teamId } }),
+  ]);
+  if (!league) throw new Error('League not found');
+  if (!team) return null;
+
+  const seasonYear = league.seasonYear;
+  const espnId = team.espnTeamId;
+
+  const [currentWeek, lastWeek, scoringWeeks, sos, sosOutOf, ownerRows, schedule, news] =
+    await Promise.all([
+      getCurrentWeek(seasonYear),
+      getLastWeek(seasonYear),
+      loadScoringWeekMap(seasonYear, [teamId]),
+      prisma.teamSos.findUnique({ where: { seasonYear_teamId: { seasonYear, teamId } } }),
+      prisma.teamSos.count({ where: { seasonYear } }),
+      prisma.rosterSlot.findMany({
+        where: { leagueId, teamId, ...(userId !== undefined ? { userId } : {}) },
+        include: { user: { select: { name: true } } },
+      }),
+      espnId
+        ? cachedEspn(`espn:teamSchedule:${espnId}:${seasonYear}`, CACHE_TTL.ESPN_SCOREBOARD, () =>
+            fetchTeamSchedule(espnId, seasonYear)
+          )
+        : null,
+      espnId
+        ? cachedEspn(`espn:teamNews:${espnId}`, CACHE_TTL.TEAM_NEWS, () => fetchTeamNews(espnId))
+        : null,
+    ]);
+
+  // Active row first, then the latest (a team dropped in the swap)
+  const ownerRow =
+    ownerRows.sort(
+      (a, b) => Number(a.toWeek !== null) - Number(b.toWeek !== null) || b.fromWeek - a.fromWeek
+    )[0] ?? null;
+
+  const games = mergeTeamGames(teamId, scoringWeeks, schedule?.games ?? [], ownerRow);
+  const preview = pickPreviewGame(games, eventId);
+
+  // ESPN's Matchup Predictor only exists before kickoff
+  let predictor: TeamCard['predictor'] = null;
+  if (espnId && preview?.status === 'scheduled' && preview.espnUrl) {
+    const pct = await cachedEspn(
+      `espn:predictor:${preview.espnEventId}`,
+      CACHE_TTL.MATCHUP_PREDICTOR,
+      () => fetchMatchupPredictor(preview.espnEventId)
+    );
+    const teamPct = pct?.[espnId];
+    const opponentPct = pct ? Object.entries(pct).find(([id]) => id !== espnId)?.[1] : undefined;
+    if (teamPct !== undefined && opponentPct !== undefined) {
+      predictor = { teamWinPct: teamPct, opponentWinPct: opponentPct };
+    }
+  }
+
+  const record = seasonRecord(scoringWeeks, teamId);
+  // Current rank rides on the team's next (or live) game; the last one after the season
+  const rankGame =
+    schedule?.games.find((g) => g.status !== 'final') ?? schedule?.games[schedule.games.length - 1];
+
+  return {
+    seasonYear,
+    currentWeek,
+    lastWeek,
+    team: {
+      teamId: team.id,
+      name: team.name,
+      abbreviation: team.abbreviation,
+      conference: team.conference,
+      slot: team.slot,
+      slotLabel: SLOT_LABELS[team.slot],
+      logo: espnLogoUrl(espnId),
+      color: schedule?.color ?? null,
+      record:
+        schedule?.record ??
+        (record.wins + record.losses > 0 ? `${record.wins}-${record.losses}` : null),
+      standing: schedule?.standing ?? null,
+      apRank: rankGame?.teamRank ?? null,
+      sosRank: sos?.sosRank ?? null,
+      sosOutOf: sosOutOf || null,
+      espnUrl: schedule?.clubhouseUrl ?? null,
+    },
+    owner: ownerRow
+      ? {
+          userId: ownerRow.userId,
+          userName: ownerRow.user.name,
+          fromWeek: ownerRow.fromWeek,
+          toWeek: ownerRow.toWeek,
+        }
+      : null,
+    pick6: {
+      points: record.points,
+      wins: record.wins,
+      losses: record.losses,
+      ownerPoints: ownerRow
+        ? games.reduce((total, g) => total + (g.counted && g.points !== null ? g.points : 0), 0)
+        : null,
+    },
+    games,
+    previewEventId: preview?.espnEventId ?? null,
+    predictor,
+    news: news ?? [],
+  };
+}

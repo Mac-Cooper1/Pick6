@@ -8,6 +8,7 @@ import {
   getAvailableTeams,
 } from '../services/rosterService';
 import { getRosterMatchups, getAllRosterMatchups } from '../services/matchupService';
+import { getTeamCard } from '../services/teamCardService';
 
 /**
  * Assert the requesting user is a member of the league.
@@ -126,4 +127,31 @@ export async function getAllMatchups(req: AuthRequest, res: Response) {
 
   const allMatchups = await getAllRosterMatchups(leagueId, weekNumber);
   res.json(allMatchups);
+}
+
+/**
+ * Team card (tap a team on My Team or Week by Week): the tapped game, game
+ * log with Pick 6 points, schedule, ESPN headlines, SOS rank
+ * GET /api/rosters/:leagueId/teams/:teamId?event=<espnEventId>&userId=<owner>
+ */
+export async function getTeamCardEndpoint(req: AuthRequest, res: Response) {
+  const leagueId = parseInt(req.params.leagueId);
+  const teamId = parseInt(req.params.teamId);
+
+  await requireMembership(leagueId, req.userId!);
+
+  if (isNaN(teamId)) {
+    throw new AppError('Invalid team ID', 400);
+  }
+  const userId = req.query.userId ? parseInt(req.query.userId as string) : undefined;
+  if (userId !== undefined && isNaN(userId)) {
+    throw new AppError('Invalid user ID', 400);
+  }
+  const eventId = typeof req.query.event === 'string' ? req.query.event : undefined;
+
+  const card = await getTeamCard(leagueId, teamId, { eventId, userId });
+  if (!card) {
+    throw new AppError('Team not found', 404);
+  }
+  res.json(card);
 }

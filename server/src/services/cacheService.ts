@@ -13,8 +13,10 @@ class CacheService {
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    // Clean up expired entries every minute
+    // Clean up expired entries every minute. unref: the janitor alone must
+    // not keep a process alive (scripts like the smoke test load this too)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60000);
+    this.cleanupInterval.unref();
   }
 
   /**
@@ -104,6 +106,8 @@ export const CACHE_TTL = {
   ESPN_SCOREBOARD: 60, // 1 minute for live scores
   ESPN_SCHEDULE: 300, // 5 minutes for schedule
   TEAM_MATCHUPS: 300, // 5 minutes for matchup data
+  TEAM_NEWS: 900, // 15 minutes for team card headlines
+  MATCHUP_PREDICTOR: 600, // 10 minutes for ESPN's pre-game win %
 } as const;
 
 export default cacheService;
