@@ -39,7 +39,7 @@ Smaller spreads and pick'ems score as regular results.
 - **Live snake draft**: Socket.IO rooms, server-time countdown clock, scheduled auto-start with a pre-draft lobby (order, presence, queue building), slot-aware pick validation, draft queue with AP-rank autopick fallback
 - **Draft order**: assigned when the draft is scheduled — random or set manually by the commissioner in Settings — and visible in the lobby before the first pick
 - **My Team**: your five teams with this week's game each — opponent, kickoff, venue, TV network (from ESPN), and the stored spread with what it means for scoring
-- **Team card**: tap a team on My Team, Week by Week or League for its season, ESPN fantasy player-card style: the tapped game (preview with ESPN's matchup predictor, live, or final), the season (results with each game's Pick 6 points, then upcoming games and byes), ESPN headlines, record, rank and FPI SOS rank
+- **Team card**: tap a team on My Team, Week by Week, League or the Week 6 Swap board for its season, ESPN fantasy player-card style: the tapped game (preview with ESPN's matchup predictor, live, or final), the season (results with each game's Pick 6 points, then upcoming games and byes), ESPN headlines, record, rank and FPI SOS rank
 - **Week 6 Swap tab**: every unowned team sorted by Pick 6 points this season (slot filters, your own team in that slot for comparison, one-tap Add), your ranked swap list, the projected order with the tiebreaker, and a recap of how the swap went after the run; swapped-in teams carry a "Week 6 Swap" badge on My Team, Week by Week and League
 - **Standings tiebreaker**: ESPN FPI strength of schedule, refreshed on every scheduled sync; one ordering (`standingsService`) drives the Leaderboard, Week by Week, the dashboard rank and the swap order
 - **Settings** opens from the header button (Log out lives in Settings; the dashboard, which has no settings page, keeps Log out in its header)
@@ -169,6 +169,11 @@ pick6/
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Oct 1, 2026** — Team card on the Week 6 Swap board (Mac's request):
+- **Where**: every row on Available teams opens that team's card, so you can scout an unowned team's season while ranking your list (it has no owner, so no game is greyed out). With a slot filter on, the "Your [slot] team" row opens your own team's card for comparison. Add stays its own button beside the row, and the board's intro now says "Tap a team for its season."
+- Client only (`SwapTab.tsx`): the card endpoint already handled unowned teams, so no server change, no migration and no Odds API calls
+- Verified: `tsc` + `vite build` green; board rows and the your-team row opened the right cards in the browser at 1280 and 375 widths (local league 10, lists open), with the card's Pick 6 points matching the board's; on a phone each row is a 269×58px tap target with Add beside it, not inside it
 
 **Sep 30, 2026 (after PR #19)** — Team card follow-ups (Mac's review):
 - **One Season tab** replaces Game Log + Schedule: the whole season in week order, results with each game's Pick 6 points, then the games still to play, byes included. The right column is Pick 6 points only (with a column head); lines moved into each row's detail line so a points "+1" can't be read as a spread
