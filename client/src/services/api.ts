@@ -193,6 +193,7 @@ export interface WeekDetailTeam {
   teamId: number;
   teamName: string;
   fromWeek: number; // > 1 = added in the week-6 swap
+  espnEventId: string | null; // null on a bye
   opponent: string | null;
   result: 'W' | 'L' | 'pending' | 'none';
   scoreLine: string | null;
@@ -409,6 +410,88 @@ export const matchupApi = {
   getAllMatchups: async (leagueId: number, week?: number): Promise<Array<{ userId: number; userName: string; matchups: TeamMatchup[] }>> => {
     const params = week ? `?week=${week}` : '';
     const { data } = await api.get(`/rosters/${leagueId}/matchups/all${params}`);
+    return data;
+  },
+};
+
+// Team card (tap a team on My Team or Week by Week)
+export interface TeamCardGame {
+  espnEventId: string;
+  week: number; // the Pick 6 week it counts in
+  playedWeek: number; // ESPN week; differs when a double-game rolled forward
+  startTime: string;
+  timeTbd: boolean;
+  status: 'scheduled' | 'in_progress' | 'final' | 'postponed' | 'cancelled';
+  statusDetail: string | null; // ESPN's short status, e.g. "Q3 4:12"
+  isHome: boolean;
+  neutralSite: boolean;
+  teamRank: number | null; // AP/CFP rank going into the game
+  opponent: {
+    name: string;
+    abbreviation: string | null;
+    logo: string | null;
+    rank: number | null;
+    record: string | null;
+  };
+  teamScore: number | null;
+  opponentScore: number | null;
+  result: 'W' | 'L' | null;
+  teamSpread: number | null; // stored line, team-relative (+ = underdog)
+  wasUpset: boolean;
+  points: number | null; // null until scored
+  counted: boolean; // false = outside the owner's roster window (the swap)
+  venue: string | null;
+  broadcast: string | null;
+  espnUrl: string | null;
+}
+
+export interface TeamHeadline {
+  headline: string;
+  url: string;
+  published: string;
+  type: string; // Story, HeadlineNews, Recap, Preview or Media (video)
+}
+
+export interface TeamCardData {
+  seasonYear: number;
+  currentWeek: number;
+  lastWeek: number;
+  team: {
+    teamId: number;
+    name: string;
+    abbreviation: string | null;
+    conference: string;
+    slot: ConferenceSlot;
+    slotLabel: string;
+    logo: string | null;
+    color: string | null; // ESPN hex, no '#'
+    record: string | null;
+    standing: string | null;
+    apRank: number | null;
+    sosRank: number | null; // ESPN FPI strength of schedule, 1 = hardest
+    sosOutOf: number | null;
+    espnUrl: string | null;
+  };
+  owner: { userId: number; userName: string; fromWeek: number; toWeek: number | null } | null;
+  pick6: { points: number; wins: number; losses: number; ownerPoints: number | null };
+  games: TeamCardGame[];
+  previewEventId: string | null;
+  predictor: { teamWinPct: number; opponentWinPct: number } | null;
+  news: TeamHeadline[];
+}
+
+export const teamApi = {
+  // eventId = the tapped game; userId = whose roster it was tapped on
+  getTeamCard: async (
+    leagueId: number,
+    teamId: number,
+    { eventId, userId }: { eventId?: string | null; userId?: number } = {}
+  ): Promise<TeamCardData> => {
+    const params = new URLSearchParams();
+    if (eventId) params.set('event', eventId);
+    if (userId) params.set('userId', String(userId));
+    const qs = params.toString();
+    const { data } = await api.get<TeamCardData>(`/rosters/${leagueId}/teams/${teamId}${qs ? `?${qs}` : ''}`);
     return data;
   },
 };

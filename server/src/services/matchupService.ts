@@ -296,7 +296,7 @@ function getSeasonPointsByTeam(
 }
 
 /** Present a stored Game row the way the ESPN scoreboard parser would. */
-function gameRowStatus(status: ScoredGame['status']): ParsedGame['status'] {
+export function gameRowStatus(status: ScoredGame['status']): ParsedGame['status'] {
   switch (status) {
     case 'FINAL':
       return 'final';

@@ -31,6 +31,13 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## V2 ideas
 
+- **Team card from the League tab and the Week 6 Swap board.** Sep 30 the
+  card shipped on the two tabs Mac asked for (My Team, Week by Week). It
+  takes `{ teamId, teamName, userId?, eventId?, week? }`, so another entry
+  point is a few lines. The swap board is the strongest case: scouting an
+  unowned team's game log and schedule while ranking your list (no owner
+  there, so nothing greys out).
+
 - **Take lines from ESPN instead of The Odds API.** ESPN's scoreboard
   response (the one the sync already fetches) embeds `competitions[0].odds`
   with the DraftKings spread for 84 of 86 week-2 games, keyed by the same

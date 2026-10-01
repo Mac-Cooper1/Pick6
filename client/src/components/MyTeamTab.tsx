@@ -2,17 +2,19 @@
  * My Team Tab
  *
  * Your five teams and their games this week: opponent, kickoff, venue, TV
- * network, and the stored spread (the exact line scoring uses). The week-6
- * swap has its own tab (SwapTab).
+ * network, and the stored spread (the exact line scoring uses). Tapping a
+ * card opens that team's TeamCard. The week-6 swap has its own tab (SwapTab).
  */
 
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { CaretRight } from '@phosphor-icons/react';
 import { useAuth } from '../contexts/AuthContext';
 import { leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { SwapBadge } from './SwapBadge';
+import { TeamCard, TeamCardTarget } from './TeamCard';
 import { DRAFT_SLOTS, SLOT_LABELS, ConferenceSlot } from '../types';
 
 interface MyTeamTabProps {
@@ -48,6 +50,7 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
   const viewingUserId = viewUserId ?? user?.id;
   const viewingSelf = viewingUserId === user?.id;
   const viewedMember = currentLeague?.members?.find((m) => m.id === viewingUserId);
+  const [cardTarget, setCardTarget] = useState<TeamCardTarget | null>(null);
 
   const {
     data: matchups,
@@ -103,6 +106,7 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
           </h2>
           <p className="section-sub">
             {viewingSelf ? 'Your' : 'Their'} five, week {currentLeague?.currentWeek ?? ''}. Spreads are the lines scoring uses.
+            Tap a team for its season.
           </p>
         </div>
         {(currentLeague?.members?.length ?? 0) > 1 && (
@@ -161,7 +165,20 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
             const oppScore = game ? (game.isHomeTeam ? game.awayScore : game.homeScore) : null;
 
             return (
-              <div key={slot} className="card p-4 sm:p-5">
+              <button
+                key={slot}
+                type="button"
+                onClick={() =>
+                  setCardTarget({
+                    teamId: m.teamId,
+                    teamName: m.teamName,
+                    userId: viewingUserId,
+                    eventId: game?.espnEventId ?? null,
+                    week: currentLeague?.currentWeek,
+                  })
+                }
+                className="card p-4 sm:p-5 block w-full text-left transition-colors hover:border-green-600 active:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -235,47 +252,54 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
                   </div>
                 </div>
 
-                {/* Game details */}
-                <div className="mt-3 pt-3 border-t border-gray-200">
-                  {game ? (
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
-                      <p className="text-gray-800 font-medium">
-                        {game.isHomeTeam ? 'vs.' : 'at'}{' '}
-                        {oppRank && <span className="font-display font-bold text-amber-700">#{oppRank} </span>}
-                        {game.opponent}
+                {/* Game details; the caret says the card opens */}
+                <div className="mt-3 pt-3 border-t border-gray-200 flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    {game ? (
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+                        <p className="text-gray-800 font-medium">
+                          {game.isHomeTeam ? 'vs.' : 'at'}{' '}
+                          {oppRank && <span className="font-display font-bold text-amber-700">#{oppRank} </span>}
+                          {game.opponent}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {game.status === 'postponed' ? (
+                            <span className="text-orange-600 font-semibold">Postponed</span>
+                          ) : game.status === 'cancelled' ? (
+                            <span className="text-red-600 font-semibold">Cancelled</span>
+                          ) : (
+                            <>
+                              {formatKickoff(game.startTime)}
+                              {game.venue && <> &middot; {game.venue}</>}
+                              {game.broadcast && (
+                                <>
+                                  {' '}&middot;{' '}
+                                  <span className="font-semibold text-gray-700">{game.broadcast}</span>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 italic">No game this week</p>
+                    )}
+                    {rolledIn && (
+                      <p className="text-xs text-amber-700 mt-1">
+                        Played in week {game.playedWeek}. Counts as this week's game because the team is off this week.
                       </p>
-                      <p className="text-sm text-gray-500">
-                        {game.status === 'postponed' ? (
-                          <span className="text-orange-600 font-semibold">Postponed</span>
-                        ) : game.status === 'cancelled' ? (
-                          <span className="text-red-600 font-semibold">Cancelled</span>
-                        ) : (
-                          <>
-                            {formatKickoff(game.startTime)}
-                            {game.venue && <> &middot; {game.venue}</>}
-                            {game.broadcast && (
-                              <>
-                                {' '}&middot;{' '}
-                                <span className="font-semibold text-gray-700">{game.broadcast}</span>
-                              </>
-                            )}
-                          </>
-                        )}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400 italic">No game this week</p>
-                  )}
-                  {rolledIn && (
-                    <p className="text-xs text-amber-700 mt-1">
-                      Played in week {game.playedWeek}. Counts as this week's game because the team is off this week.
-                    </p>
-                  )}
+                    )}
+                  </div>
+                  <CaretRight size={16} weight="bold" className="shrink-0 text-gray-400" aria-hidden />
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
+      )}
+
+      {cardTarget && (
+        <TeamCard leagueId={leagueId} target={cardTarget} onClose={() => setCardTarget(null)} />
       )}
     </div>
   );

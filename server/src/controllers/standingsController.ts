@@ -17,6 +17,7 @@ interface WeekDetailTeam {
   teamId: number;
   teamName: string;
   fromWeek: number; // > 1 = added in the week-6 swap
+  espnEventId: string | null; // null on a bye (the team card opens on this game)
   opponent: string | null;
   result: 'W' | 'L' | 'pending' | 'none';
   scoreLine: string | null;
@@ -148,6 +149,7 @@ export async function getWeekDetail(req: AuthRequest, res: Response) {
         return [
           {
             ...base,
+            espnEventId: null,
             opponent: null,
             result: 'none' as const,
             scoreLine: null,
@@ -182,6 +184,7 @@ export async function getWeekDetail(req: AuthRequest, res: Response) {
 
         return {
           ...base,
+          espnEventId: game.espnEventId,
           opponent,
           result,
           scoreLine,
