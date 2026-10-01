@@ -100,6 +100,13 @@ turn — standing instruction from Mac)**.
   `order-N` on the panels; desktop keeps DOM order). Visible UI copy: no
   em-dashes (periods/commas/colons instead), light theme only (dark mode is
   parked in NOTES.md).
+- **The repo is public** (Sep 30) under `LICENSE.md`: Pick 6's own
+  source-available terms (read, change, share, run privately; no hosting
+  for others, no packaging, no commercial or competing use; contributions
+  licensed to Mac). Both `package.json` files say `SEE LICENSE IN
+  ../LICENSE.md`. Never commit secrets: `.env` files and
+  `.claude/db-access.md` are git-ignored, and on Sep 30 no secret value
+  appeared anywhere in git history.
 - **Production = ONE Render service** (`render.yaml` blueprint): Express
   serves `client/dist` with an SPA fallback → everything same-origin, **no
   CORS config, no VITE_API_URL** (that env var exists only as a split-deploy
