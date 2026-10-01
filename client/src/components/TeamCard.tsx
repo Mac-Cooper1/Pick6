@@ -1,6 +1,7 @@
 /**
- * Team card: tap a team on My Team or Week by Week and its season opens in a
- * sheet (bottom sheet on phones, centered dialog from `sm` up). Modeled on
+ * Team card: tap a team on My Team, Week by Week, League or the Week 6 Swap
+ * board and its season opens in a sheet (bottom sheet on phones, centered
+ * dialog from `sm` up). Modeled on
  * ESPN fantasy's player card minus the roster moves: a header in the team's
  * color, a stat strip (Pick 6 points, record, rank, FPI SOS), then tabs for
  * the tapped game, the season (results with each game's Pick 6 points, then

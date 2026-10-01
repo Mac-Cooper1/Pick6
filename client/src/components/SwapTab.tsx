@@ -9,7 +9,8 @@
  * SOS rank) and each player gets the highest swap on their list that's still
  * possible. Only teams unowned at the lock can be added, so a dropped team
  * stays out of play. Afterwards the tab shows the league's swaps and how
- * each of your lines went.
+ * each of your lines went. Tapping a board team (or your team in that slot)
+ * opens its TeamCard.
  */
 
 import React, { useState } from 'react';
@@ -20,6 +21,7 @@ import { leagueApi, swapApi, SwapClaim, SwapLine, SwapState, SwapTeam } from '..
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { Button } from './Button';
+import { TeamCard, TeamCardTarget } from './TeamCard';
 import { ConferenceSlot, DRAFT_SLOTS, SLOT_LABELS } from '../types';
 
 interface SwapTabProps {
@@ -100,6 +102,8 @@ export function SwapTab({ leagueId }: SwapTabProps) {
   const [slotFilter, setSlotFilter] = useState<SlotFilter>('ALL');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // Tapping a team opens its TeamCard; a board team has no owner, so nothing greys out
+  const [cardTarget, setCardTarget] = useState<TeamCardTarget | null>(null);
 
   const { data: leagues } = useQuery({
     queryKey: ['myLeagues'],
@@ -400,7 +404,7 @@ export function SwapTab({ leagueId }: SwapTabProps) {
             <div className="p-4 pb-3">
               <p className="label">Available teams</p>
               <p className="text-xs text-gray-500 mt-0.5">
-                Every unowned team, most Pick 6 points this season first.
+                Every unowned team, most Pick 6 points this season first. Tap a team for its season.
                 {editable && ' Add puts a team on your list against your team in the same slot.'}
               </p>
               <p className="text-xs text-gray-700 mt-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
@@ -426,7 +430,13 @@ export function SwapTab({ leagueId }: SwapTabProps) {
             </div>
 
             {filterTeam && (
-              <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-sm flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setCardTarget({ teamId: filterTeam.teamId, teamName: filterTeam.name, userId: user?.id })
+                }
+                className="w-full px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-sm text-left flex items-center justify-between gap-3 transition-colors hover:bg-gray-100 active:bg-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-600"
+              >
                 <span className="text-gray-600 min-w-0">
                   Your {SLOT_LABELS[filterTeam.slot]} team:{' '}
                   <span className="font-semibold text-gray-900">{filterTeam.name}</span>{' '}
@@ -435,7 +445,7 @@ export function SwapTab({ leagueId }: SwapTabProps) {
                   </span>
                 </span>
                 <Points value={filterTeam.points} className="text-lg shrink-0" />
-              </div>
+              </button>
             )}
 
             {!teams ? (
@@ -454,15 +464,22 @@ export function SwapTab({ leagueId }: SwapTabProps) {
                     ...(team.conference !== team.slotLabel ? [team.conference] : []),
                   ].join(' · ');
                   return (
-                    <li key={team.teamId} className="px-4 py-2.5 flex items-center gap-3">
-                      <span className="font-display font-bold text-gray-400 w-6 text-center shrink-0 tabular-nums">
-                        {index + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-gray-900 leading-snug">{team.name}</p>
-                        <p className="text-xs text-gray-500 truncate">{details}</p>
-                      </div>
-                      <Points value={team.points} className="text-xl w-10 text-right shrink-0" />
+                    // The row opens the team's card; Add sits beside it, not inside it
+                    <li key={team.teamId} className={`flex items-center ${editable ? 'pr-4' : ''}`}>
+                      <button
+                        type="button"
+                        onClick={() => setCardTarget({ teamId: team.teamId, teamName: team.name })}
+                        className={`flex-1 min-w-0 pl-4 ${editable ? 'pr-3' : 'pr-4'} py-2.5 flex items-center gap-3 text-left transition-colors hover:bg-gray-50 active:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-600`}
+                      >
+                        <span className="font-display font-bold text-gray-400 w-6 text-center shrink-0 tabular-nums">
+                          {index + 1}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-semibold text-gray-900 leading-snug">{team.name}</span>
+                          <span className="block text-xs text-gray-500 truncate">{details}</span>
+                        </span>
+                        <Points value={team.points} className="text-xl w-10 text-right shrink-0" />
+                      </button>
                       {editable && (
                         <div className="w-14 sm:w-24 shrink-0 flex justify-end">
                           {priority !== undefined ? (
@@ -491,6 +508,10 @@ export function SwapTab({ leagueId }: SwapTabProps) {
           </div>
         )}
       </div>
+
+      {cardTarget && (
+        <TeamCard leagueId={leagueId} target={cardTarget} onClose={() => setCardTarget(null)} />
+      )}
     </div>
   );
 }
