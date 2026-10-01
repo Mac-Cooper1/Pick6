@@ -11,14 +11,17 @@
 #        cd server && DATABASE_URL='<external-url>' npm run prisma:seed
 #
 # npm note: Render exports NODE_ENV=production, which makes plain `npm ci`
-# skip devDependencies — but the build needs prisma/vite/typescript, so both
-# installs use --include=dev.
+# skip devDependencies. The server keeps everything its build and preDeploy
+# need (prisma, typescript) in dependencies, so its install skips dev
+# tooling (ESLint); the client build needs vite/typescript from
+# devDependencies, so that install uses --include=dev. Node's version comes
+# from the root .node-version (CI reads the same file).
 services:
   - type: web
     name: pick6
     runtime: node
     plan: starter # always-on: required for live draft sockets
-    buildCommand: cd server && npm ci --include=dev && npx prisma generate && npm run build && cd ../client && npm ci --include=dev && npm run build
+    buildCommand: cd server && npm ci && npx prisma generate && npm run build && cd ../client && npm ci --include=dev && npm run build
     preDeployCommand: cd server && npx prisma migrate deploy
     startCommand: cd server && npm start
     healthCheckPath: /health

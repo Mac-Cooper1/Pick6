@@ -29,8 +29,8 @@ export async function testDatabaseConnection(): Promise<void> {
     // Simple query to test connection
     await client.$queryRaw`SELECT 1`;
     console.log('✅ Database connection established successfully');
-  } catch (error: any) {
-    const errorMessage = error.message || String(error);
+  } catch (error) {
+    const errorMessage = (error instanceof Error && error.message) || String(error);
 
     // Parse common Prisma/PostgreSQL errors and provide actionable messages
     if (errorMessage.includes('Tenant or user not found')) {
@@ -92,14 +92,11 @@ export async function testDatabaseConnection(): Promise<void> {
 }
 
 // Helper to extract host from DATABASE_URL for error messages
+// (URL parsing ends the user info at the LAST '@', so a password containing
+// '@' can't leak into the message; the old first-'@' regex printed its tail)
 function getDatabaseHost(): string {
-  try {
-    const url = process.env.DATABASE_URL || '';
-    const match = url.match(/@([^:/]+)/);
-    return match ? match[1] : 'unknown';
-  } catch {
-    return 'unknown';
-  }
+  const url = process.env.DATABASE_URL || '';
+  return (URL.canParse(url) && new URL(url).hostname) || 'unknown';
 }
 
 // Graceful shutdown

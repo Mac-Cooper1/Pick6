@@ -2,6 +2,8 @@
 
 Draft **5 college football teams — one per conference slot — and ride their wins all season.** Live snake draft with your league, automated scoring from real games and betting lines, one cumulative leaderboard. Built for the 2026 season.
 
+**Play:** https://pick6-o4qw.onrender.com (the official Pick 6; any league can sign up there)
+
 ## Game Rules
 
 **The draft.** Each player fills 5 conference slots, one team per slot:
@@ -57,7 +59,7 @@ Smaller spreads and pick'ems score as regular results.
 
 ## Getting Started (local)
 
-Prereqs: Node 18+, Docker (Docker Desktop or [Colima](https://github.com/abiosoft/colima): `brew install colima docker docker-compose && colima start`).
+Prereqs: Node 22 (pinned in `.node-version`, which CI and Render also read; ESLint 10 needs 22.13+), Docker (Docker Desktop or [Colima](https://github.com/abiosoft/colima): `brew install colima docker docker-compose && colima start`).
 
 ```bash
 # 1. Postgres (NOTE: host port 5433 — 5432 is left free for any native Postgres)
@@ -85,11 +87,10 @@ cd server && npx tsx scripts/smoke-test.ts
 
 Leaves an inspectable "Smoke League" — sign in as `smoke1@test.local` / `smoke123`.
 
-**Lint** (ESLint 10; the PR check runs it along with the type check and client build):
+**Lint** (ESLint 10; the PR check runs it too). From the repo root:
 
 ```bash
-cd server && npm run lint
-cd client && npm run lint
+npm --prefix server run lint && npm --prefix client run lint
 ```
 
 ## Environment Variables
@@ -152,7 +153,7 @@ pick6/
 │   └── lib/, utils/, types/
 ├── server/prisma/         # schema, migrations, ESPN-driven seed
 ├── server/scripts/        # smoke-test.ts (end-to-end draft + scoring)
-├── .github/workflows/     # scheduled sync cron
+├── .github/workflows/     # scheduled sync cron (sync.yml) + PR checks (checks.yml)
 ├── docker-compose.yml     # local Postgres on host port 5433
 └── LAUNCH_PLAN.md         # workstream plan, decisions D1–D7, defect audit
 ```
@@ -163,7 +164,7 @@ pick6/
 
 ## License
 
-Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome to read the code, change it, share it and run it privately, and pull requests are welcome; hosting a copy for other people, packaging it as an app, or using it commercially isn't allowed. Want your own league? Create one on Pick 6. Third-party packages, fonts and data (ESPN, The Odds API) keep their own terms.
+Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome to read the code, change it, share it and run it privately, and pull requests are welcome; hosting a copy for other people, packaging it as an app, or using it commercially isn't allowed. Want your own league? Create one on [Pick 6](https://pick6-o4qw.onrender.com). Third-party packages, fonts and data (ESPN, The Odds API) keep their own terms.
 
 ## Changelog
 
@@ -181,9 +182,21 @@ Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome 
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
 
+**Oct 1, 2026** — Fixes from a full code review of PR #21 (15 findings; everything but Dependabot, which is a GitHub settings toggle):
+- **Login redirect, closed for real**: `?next=/.//evil.com` (or `/%2e//evil.com`, `/x/..//evil.com`) passed the same-site check and resolved to `//evil.com`, which a browser reads as another host. Only React Router 6.30.6 collapsing `//` kept it on-site. `internalPath` now also rejects any result starting with `//`
+- **No more database details in error responses**: the global error handler returned any error's raw message, so during a database outage clients saw Prisma's text (internal DB host and port, model and query). Now only AppErrors and Express's own 4xx messages go to the client; anything else is a generic 500 with the details in the log. Controllers and the draft socket that pass a service's message through use `clientMessage()`, which hides Prisma's text the same way
+- **Draft room queue**: while it's your turn, selecting a team pins it to the front of your queue. Moving off it dropped the team even if you had queued it yourself, and saved the shorter queue (autopick could no longer fall back to it). The pin now remembers where the team came from and puts it back; a drafted team is also dropped from your local queue right away, so it can't come back
+- **League tab**: tiles said "No Game" while this week's matchups were still loading or after the request failed; they now say Loading... / Couldn't load games
+- **Node version pinned**: production's Node wasn't pinned (Render's default for a new service is 24) while CI tested 22. The root `.node-version` (`22`) is now read by both Render and the PR check
+- **PR check catches more**: every migration is applied to an empty Postgres (the same `prisma migrate deploy` Render's preDeploy runs), then the server must boot and answer `/health`
+- **Smaller deploys**: `prisma` moved to the server's dependencies, so Render's server install drops `--include=dev` and no longer installs or ships the ESLint toolchain (112 packages instead of about 250)
+- **Types**: `no-explicit-any` is back on outside the files that parse untyped ESPN/Odds JSON; the other 52 `any`s got real types (`NextFunction`, Prisma's update input, typed draft state/queue/settings/sync API responses), and caught errors are `unknown` through `utils/errors.ts` (server) and `apiErrorMessage` (client)
+- **Smaller fixes**: `getDatabaseHost` parses the URL (a password containing `@` printed part of itself as the "host" in startup errors); `.agents/skills` is credited as MIT with its upstream LICENSE; both packages are `"private": true` (no accidental npm publish); README/LICENSE/LAUNCH_PLAN name the official site; README's Node prereq, lint command and project tree fixed; the parked-advisories notes are accurate about React Router shipping to production; cfb routes reuse the shared `asyncHandler`
+- Verified: smoke test, `tsc` and lint (both packages) and the client build green; the new CI steps replayed locally (14 migrations onto a throwaway Postgres, boot + `/health`); Render's server build replayed without dev dependencies; the queue fix, `internalPath` cases, `getDatabaseHost` cases and every error-handler case exercised directly
+
 **Sep 30, 2026 (after PR #20)** — Security updates, ESLint, a PR check and a license (Mac's items 4 and 5, then the license):
 - **Server `npm audit`: 14 -> 0** (Render's log said 13; a new advisory landed since). The 1 critical (`tar`) and 2 highs lived in bcrypt 5's install-time binary downloader (`@mapbox/node-pre-gyp`), which only runs during `npm ci`. **bcrypt 5 -> 6** removes it: same `hash`/`compare` API, Node 18+, prebuilt binaries in the package, so the downloader and about 50 install-time packages are gone. Checked: a password hash made by bcrypt 5 at production cost still logs in under bcrypt 6 (and a wrong password is still rejected), via the real login endpoint too. The other 11 were request-handling DoS bugs fixed within current majors: express 4.21 -> 4.22.3 (body-parser, qs, path-to-regexp), socket.io internals (engine.io, socket.io-parser, ws) and jws (jsonwebtoken)
-- **Client `npm audit`: 30 -> 4.** Everything that ships to browsers is patched (axios 1.12 -> 1.20, react-router 6.30.1 -> 6.30.6, socket.io-client internals), as are most build tools, and the dead ESLint 8 toolchain (with its vulnerable `@typescript-eslint` v6 packages) is replaced below. The 4 left need major versions and don't reach production: 3 are Vite/esbuild dev-server bugs (production serves the built files from Express, not Vite) and 1 is React Router, whose two advisories are SSR-only (not used here) and a backslash open redirect that the login fix below closes for us. Parked in NOTES.md
+- **Client `npm audit`: 30 -> 4.** Everything that ships to browsers is patched (axios 1.12 -> 1.20, react-router 6.30.1 -> 6.30.6, socket.io-client internals), as are most build tools, and the dead ESLint 8 toolchain (with its vulnerable `@typescript-eslint` v6 packages) is replaced below. The 4 left (vite, esbuild, react-router, react-router-dom) need major versions. Vite and esbuild are dev-server bugs that don't reach production (it serves the built files from Express, not Vite). React Router does ship to production: one advisory is SSR-only (not used here), the other an open redirect through user-controlled navigation targets, and the only one is Login's `?next=`, which the fix below guards. Parked in NOTES.md
 - **Login redirect hardening**: `?next=` (the after-login destination) accepted `/\evil.com` and `/<tab>/evil.com`, which browsers read as another site, so a crafted login link could bounce someone off Pick 6 after they signed in. It's now resolved against our own origin (`internalPath` in Login); anything that would leave the site goes to the dashboard. Normal links (shared join links, `/league/:id`) work as before
 - **ESLint 10 in both packages** (`npm run lint`, flat config, warnings fail): ESLint + typescript-eslint recommended, plus the two classic React hooks rules on the client. Off on purpose: `no-explicit-any` (83 uses, nearly all untyped ESPN/Odds JSON and caught errors) and the hooks plugin's React Compiler rules (no compiler here). Fixed the 23 findings: unused imports/variables/parameters, a dead env helper, two `try { } catch (e) { throw e }` wrappers in the standings controller, two dead assignments, `let` -> `const`, a needless regex escape, an unused eslint-disable comment, the `Function` type in `asyncHandler`, and the original error kept as `cause` when database connection errors are re-thrown (server tsconfig `lib` -> ES2022 for that; the emitted target is unchanged)
 - **PR check** (`.github/workflows/checks.yml`, free on a public repo): every PR and push to `main` runs server lint + type check and client lint + build on Node 22. It can't run the smoke test (that needs Postgres), so that stays a local step

@@ -84,14 +84,20 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 ## Parking lot
 
 - **Client major upgrades the audit still lists (2027 offseason, or a quiet
-  week).** After Sep 30's fixes `npm audit` shows 4 in `client/`, all
-  needing a major version, none reaching production: Vite 5 -> 6.4.3+ (8 is
-  latest; 8 also needs @vitejs/plugin-react 6) clears 3 dev-server bugs
-  (production serves the built files from Express, not Vite); React Router
-  6 -> 7.18+ clears an SSR-only advisory (no SSR here) and a backslash
-  open redirect that Login's `internalPath` already blocks for `?next=`.
-  Do them as their own change with a full browser pass, not mixed into a
-  fix. The server is at 0.
+  week).** After Sep 30's fixes `npm audit` shows 4 in `client/` (vite,
+  esbuild, react-router, react-router-dom), all needing a major version.
+  Vite 5 -> 6.4.3+ (8 is latest; 8 also needs @vitejs/plugin-react 6)
+  clears dev-server bugs that never reach production (it serves the built
+  files from Express, not Vite). React Router 6 -> 7.18+ DOES ship to
+  production: it clears an SSR-only advisory (no SSR here) and an open
+  redirect through user-controlled navigation targets. The only such
+  target is Login's `?next=`, guarded by `internalPath` (which also
+  rejects results starting with `//`); any new user-controlled
+  navigate()/Link target makes this upgrade urgent. Do them as their own
+  change with a full browser pass, not mixed into a fix. The server is at
+  0. Dependabot alerts + security updates should be on (GitHub Settings ->
+  Advanced Security) so new advisories open PRs instead of waiting for
+  someone to read a deploy log.
 
 - **Drop the dead turn-based swap columns (2027 offseason).** The Sep 30
   week-6 swap left `League.swapStatus`, `League.swapTurnDeadline`,

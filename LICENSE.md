@@ -4,9 +4,9 @@ Copyright (c) 2026 Mac Cooper. All rights reserved, except as allowed below.
 
 Pick 6's source code is public so people can read it, learn from it and
 suggest improvements. It is not open source: the only hosted Pick 6 is the
-one Mac Cooper runs (the "official Pick 6"). By copying, changing or running
-this code you agree to these terms. If you don't follow them, you have no
-permission to use the code at all.
+one Mac Cooper runs (the "official Pick 6", https://pick6-o4qw.onrender.com).
+By copying, changing or running this code you agree to these terms. If you
+don't follow them, you have no permission to use the code at all.
 
 ## You may
 
@@ -43,7 +43,10 @@ other license terms, and you confirm it is yours to give.
 This license covers only the Pick 6 code in this repository. The third-party
 software it depends on (installed from npm), its fonts, and data or images
 from other services (such as ESPN scores, schedules and team logos, or
-betting lines) keep their own licenses and terms.
+betting lines) keep their own licenses and terms. The design guides in
+`.agents/skills/` (linked from `.claude/skills/`) come from
+github.com/Leonxlnx/taste-skill and are under the MIT License; see
+`.agents/skills/LICENSE`.
 
 ## Ending
 

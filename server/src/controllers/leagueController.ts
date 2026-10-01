@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { NextFunction, Response } from 'express';
 import { AuthRequest, CreateLeagueRequest, JoinLeagueRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { generateJoinCode, validateJoinCode } from '../utils/joinCode';
@@ -8,14 +8,15 @@ import { getStandings } from '../services/standingsService';
 import { getAllRosters } from '../services/rosterService';
 import { getIOInstance } from '../socket/draftSocket';
 import prisma from '../lib/prisma';
-import { MemberRole, DraftStatus } from '@prisma/client';
+import { MemberRole, DraftStatus, Prisma } from '@prisma/client';
+import { clientMessage } from '../utils/errors';
 
 /**
  * Create a new league
  * POST /api/leagues/create
  * Body: { name, maxPlayers, customJoinCode? }
  */
-export async function createLeague(req: AuthRequest, res: Response, next: any) {
+export async function createLeague(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
     const { name, maxPlayers, customJoinCode }: CreateLeagueRequest = req.body;
@@ -104,7 +105,7 @@ export async function createLeague(req: AuthRequest, res: Response, next: any) {
  * POST /api/leagues/join
  * Body: { joinCode }
  */
-export async function joinLeague(req: AuthRequest, res: Response, next: any) {
+export async function joinLeague(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
     const { joinCode }: JoinLeagueRequest = req.body;
@@ -188,7 +189,7 @@ export async function joinLeague(req: AuthRequest, res: Response, next: any) {
  * Get league details
  * GET /api/leagues/:leagueId
  */
-export async function getLeague(req: AuthRequest, res: Response, next: any) {
+export async function getLeague(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
     const leagueId = parseInt(req.params.leagueId);
@@ -235,7 +236,7 @@ export async function getLeague(req: AuthRequest, res: Response, next: any) {
  * Get all league members with their teams
  * GET /api/leagues/:leagueId/members
  */
-export async function getLeagueMembers(req: AuthRequest, res: Response, next: any) {
+export async function getLeagueMembers(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
     const leagueId = parseInt(req.params.leagueId);
@@ -300,7 +301,7 @@ export async function getLeagueMembers(req: AuthRequest, res: Response, next: an
  * Get all leagues for the current user
  * GET /api/leagues/my
  */
-export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
+export async function getMyLeagues(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
 
@@ -382,7 +383,7 @@ export async function getMyLeagues(req: AuthRequest, res: Response, next: any) {
  * Update league settings (commissioner only)
  * PATCH /api/leagues/:leagueId/settings
  */
-export async function updateLeagueSettings(req: AuthRequest, res: Response, next: any) {
+export async function updateLeagueSettings(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
     const leagueId = parseInt(req.params.leagueId);
@@ -415,7 +416,7 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
     }
 
     // Build update data
-    const updateData: any = {};
+    const updateData: Prisma.LeagueUpdateInput = {};
 
     if (draftScheduledAt !== undefined) {
       if (draftScheduledAt === null) {
@@ -451,7 +452,7 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
       if (draftOrder === 'randomize') {
         memberOrder = await assignDraftOrder(leagueId);
       } else if (Array.isArray(draftOrder)) {
-        if (draftOrder.some((id: any) => typeof id !== 'number')) {
+        if (draftOrder.some((id: unknown) => typeof id !== 'number')) {
           throw new AppError('Draft order must be a list of member user IDs', 400);
         }
         memberOrder = await assignDraftOrder(leagueId, draftOrder);
@@ -463,9 +464,9 @@ export async function updateLeagueSettings(req: AuthRequest, res: Response, next
           memberOrder = await assignDraftOrder(leagueId);
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       if (err instanceof AppError) throw err;
-      throw new AppError(err.message || 'Failed to set draft order', 400);
+      throw new AppError(clientMessage(err, 'Failed to set draft order'), 400);
     }
 
     // Push the fresh state to anyone already sitting in the lobby, so a

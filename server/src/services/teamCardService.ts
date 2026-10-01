@@ -33,6 +33,7 @@ import {
   ParsedGame,
 } from './espnClient';
 import { gameRowStatus } from './matchupService';
+import { errorMessage } from '../utils/errors';
 import { getCurrentWeek } from './seasonService';
 import {
   getLastWeek,
@@ -288,10 +289,10 @@ function cachedEspn<T>(
       lastGood.set(key, value);
       return value;
     })
-    .catch((error: any): T | null => {
+    .catch((error: unknown): T | null => {
       const fallback = lastGood.has(key) ? (lastGood.get(key) as T) : null;
       console.error(
-        `[TeamCard] ${key} failed (${error.message}); ${fallback === null ? 'no copy to serve' : 'serving the last good copy'}, next try in ${ESPN_BACKOFF_SECONDS}s`
+        `[TeamCard] ${key} failed (${errorMessage(error)}); ${fallback === null ? 'no copy to serve' : 'serving the last good copy'}, next try in ${ESPN_BACKOFF_SECONDS}s`
       );
       cacheService.set(key, { value: fallback }, ESPN_BACKOFF_SECONDS);
       return fallback;

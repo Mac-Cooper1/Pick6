@@ -16,7 +16,7 @@ import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, CaretDown, CaretUp, X } from '@phosphor-icons/react';
 import { useAuth } from '../contexts/AuthContext';
-import { leagueApi, swapApi, SwapClaim, SwapLine, SwapState, SwapTeam } from '../services/api';
+import { apiErrorMessage, leagueApi, swapApi, SwapClaim, SwapLine, SwapState, SwapTeam } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { Button } from './Button';
@@ -130,8 +130,8 @@ export function SwapTab({ leagueId }: SwapTabProps) {
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     },
-    onError: (err: any) => {
-      setError(err.response?.data?.message || 'Could not save your list');
+    onError: (err) => {
+      setError(apiErrorMessage(err, 'Could not save your list'));
       setSaved(false);
     },
   });

@@ -1,6 +1,10 @@
-# PR checks: lint, type check and build for both packages, so a mistake
-# shows up on the PR instead of in Render's deploy (free on a public repo).
-# The smoke test needs Postgres, so it stays a local step (CLAUDE.md).
+# PR checks, on every PR and push to main, so a mistake shows up here instead
+# of in Render's deploy (free on a public repo). Server: lint, type check,
+# every migration applied to an empty Postgres (Render's preDeploy runs the
+# same `prisma migrate deploy`), then it must boot and answer /health.
+# Client: lint and build. Node comes from .node-version, the file Render
+# reads too. The smoke test needs seeded teams and live ESPN data, so it
+# stays a local step (CLAUDE.md).
 name: Checks
 
 on:
@@ -17,17 +21,45 @@ jobs:
     defaults:
       run:
         working-directory: server
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: pick6
+          POSTGRES_PASSWORD: pick6
+          POSTGRES_DB: pick6
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pick6"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://pick6:pick6@localhost:5432/pick6
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci
       - run: npx prisma generate
       - run: npx tsc --noEmit
       - run: npm run lint
+      - name: Migrations apply to an empty database
+        run: npx prisma migrate deploy
+      - name: Server boots and answers /health
+        env:
+          JWT_SECRET: ci-only-not-a-secret
+          PORT: 3001
+        run: |
+          npx tsx src/server.ts > server.log 2>&1 &
+          if ! curl --silent --show-error --fail --retry 20 --retry-delay 1 --retry-connrefused http://localhost:3001/health; then
+            cat server.log
+            exit 1
+          fi
 
   client:
     runs-on: ubuntu-latest
@@ -38,7 +70,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: client/package-lock.json
       - run: npm ci

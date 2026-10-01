@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CaretUp, CaretDown, ShareNetwork } from '@phosphor-icons/react';
-import { leagueApi, adminApi, authApi } from '../services/api';
+import { leagueApi, adminApi, authApi, apiErrorMessage } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
@@ -57,7 +57,7 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
   // Manual "sync now" (commissioner) — the scheduled cron does this automatically
   const syncMutation = useMutation({
     mutationFn: () => adminApi.syncWeek(leagueId, currentLeague!.currentWeek),
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       const warnings = data.errors?.length ? `, ${data.errors.length} warnings` : '';
       setSyncResult(
         `Week ${data.weekNumber}: ${data.gamesCreated} games synced, ${data.oddsUpdated} odds updated, ${data.scoresCalculated} members rescored${warnings}`
@@ -66,8 +66,8 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
       queryClient.invalidateQueries({ queryKey: ['overallStandings'] });
       queryClient.invalidateQueries({ queryKey: ['allMatchups', leagueId] });
     },
-    onError: (err: any) => {
-      setSyncResult(err.response?.data?.message || 'Sync failed');
+    onError: (err) => {
+      setSyncResult(apiErrorMessage(err, 'Sync failed'));
     },
   });
 
@@ -130,8 +130,8 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
         return;
       }
       await copyLink();
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return; // user closed the share sheet
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return; // user closed the share sheet
       try {
         await copyLink();
       } catch {
@@ -151,8 +151,8 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
       queryClient.invalidateQueries();
       setTimeout(() => setProfileMessage(null), 3000);
     },
-    onError: (err: any) => {
-      setProfileMessage(err.response?.data?.message || 'Failed to update name');
+    onError: (err) => {
+      setProfileMessage(apiErrorMessage(err, 'Failed to update name'));
     },
   });
 
@@ -173,8 +173,8 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
       queryClient.invalidateQueries({ queryKey: ['draftState', leagueId] });
       setTimeout(() => setSuccess(null), 3000);
     },
-    onError: (err: any) => {
-      setError(err.response?.data?.message || 'Failed to save settings');
+    onError: (err) => {
+      setError(apiErrorMessage(err, 'Failed to save settings'));
       setSuccess(null);
     },
   });

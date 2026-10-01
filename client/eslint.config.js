@@ -1,6 +1,7 @@
 // ESLint flat config for the client (`npm run lint`; the PR check runs it).
 // ESLint + typescript-eslint recommended plus the React hooks rules, with
-// the deliberate choices noted below.
+// the deliberate choices noted below. No `any`: API responses are typed in
+// services/api.ts, and failed calls go through apiErrorMessage().
 import js from '@eslint/js';
 import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -19,8 +20,6 @@ export default defineConfig([
       // assume the compiler, which this app doesn't use.
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
-      // `any` is deliberate at the edges (untyped API JSON, caught errors)
-      '@typescript-eslint/no-explicit-any': 'off',
       // A leading underscore marks a parameter that has to exist
       '@typescript-eslint/no-unused-vars': [
         'error',

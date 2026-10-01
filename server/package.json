@@ -1,6 +1,7 @@
 {
   "name": "pick6-server",
   "version": "1.0.0",
+  "private": true,
   "description": "Backend server for Pick 6 fantasy college football",
   "main": "dist/server.js",
   "scripts": {
@@ -34,6 +35,7 @@
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
+    "prisma": "^5.9.1",
     "socket.io": "^4.8.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
@@ -42,7 +44,6 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.11.0",
     "globals": "^17.12.0",
-    "prisma": "^5.9.1",
     "typescript-eslint": "^8.71.0"
   },
   "prisma": {

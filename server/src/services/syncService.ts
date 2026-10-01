@@ -17,6 +17,7 @@ import {
   pointsForTeam,
 } from './scoringWeekService';
 import { runDueSwaps, SwapRunResult } from './swapService';
+import { errorMessage } from '../utils/errors';
 
 /**
  * Resolve an ESPN team to a DB team, creating an unslotted stub for unknown
@@ -134,8 +135,8 @@ export async function syncWeekGames(
       });
 
       savedGames.push(espnGame);
-    } catch (error: any) {
-      errors.push(`Error saving game ${espnGame.espnEventId}: ${error.message}`);
+    } catch (error) {
+      errors.push(`Error saving game ${espnGame.espnEventId}: ${errorMessage(error)}`);
     }
   }
 
@@ -168,8 +169,8 @@ export async function syncOdds(
   try {
     oddsData = await getNCAAFSpreads();
     console.log(`[Sync] Found ${oddsData.length} games with odds`);
-  } catch (error: any) {
-    errors.push(`Odds API error: ${error.message}`);
+  } catch (error) {
+    errors.push(`Odds API error: ${errorMessage(error)}`);
     return { updated: 0, errors };
   }
 
@@ -535,8 +536,8 @@ export async function syncCurrentWindow(
       const { games, errors: gameErrors } = await syncWeekGames(seasonYear, week);
       gamesSynced += games.length;
       errors.push(...gameErrors);
-    } catch (error: any) {
-      errors.push(`Week ${week} games: ${error.message}`);
+    } catch (error) {
+      errors.push(`Week ${week} games: ${errorMessage(error)}`);
     }
   }
 
@@ -554,8 +555,8 @@ export async function syncCurrentWindow(
   let sosRanksSynced = 0;
   try {
     sosRanksSynced = await syncSosRanks(seasonYear);
-  } catch (error: any) {
-    errors.push(`SOS ranks: ${error.message}`);
+  } catch (error) {
+    errors.push(`SOS ranks: ${errorMessage(error)}`);
   }
 
   // The week-6 swap runs here, right after week 5 was finalized and rescored
@@ -564,8 +565,8 @@ export async function syncCurrentWindow(
   let swapsRun: SwapRunResult[] = [];
   try {
     swapsRun = await runDueSwaps(seasonYear);
-  } catch (error: any) {
-    errors.push(`Week 6 swap: ${error.message}`);
+  } catch (error) {
+    errors.push(`Week 6 swap: ${errorMessage(error)}`);
   }
 
   return {

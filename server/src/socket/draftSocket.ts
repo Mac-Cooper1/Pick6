@@ -10,6 +10,7 @@
 
 import { Server, Socket } from 'socket.io';
 import { verifyToken, JWTPayload } from '../utils/auth';
+import { clientMessage } from '../utils/errors';
 import prisma from '../lib/prisma';
 import {
   getDraftState,
@@ -111,9 +112,9 @@ export function initDraftSocket(io: Server) {
         if (state.draftStatus === 'SCHEDULED' && state.draftScheduledAt) {
           startDraftCheckInterval(io, leagueId);
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error('[Socket] Error joining draft:', error);
-        socket.emit('draft:error', { message: error.message || 'Failed to join draft' });
+        socket.emit('draft:error', { message: clientMessage(error, 'Failed to join draft') });
       }
     });
 
@@ -151,9 +152,9 @@ export function initDraftSocket(io: Server) {
         // Send updated full state
         const state = await getDraftState(leagueId);
         io.to(roomName).emit('draft:state', state);
-      } catch (error: any) {
+      } catch (error) {
         console.error('[Socket] Error making pick:', error);
-        socket.emit('draft:error', { message: error.message || 'Failed to make pick' });
+        socket.emit('draft:error', { message: clientMessage(error, 'Failed to make pick') });
       }
     });
 
@@ -185,9 +186,9 @@ export function initDraftSocket(io: Server) {
 
         // Confirm to user
         socket.emit('draft:queue:updated', { teamIds });
-      } catch (error: any) {
+      } catch (error) {
         console.error('[Socket] Error updating queue:', error);
-        socket.emit('draft:error', { message: error.message || 'Failed to update queue' });
+        socket.emit('draft:error', { message: clientMessage(error, 'Failed to update queue') });
       }
     });
 
@@ -222,9 +223,9 @@ export function initDraftSocket(io: Server) {
         if (state.pickDeadline) {
           startPickTimer(io, leagueId, new Date(state.pickDeadline));
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error('[Socket] Error starting draft:', error);
-        socket.emit('draft:error', { message: error.message || 'Failed to start draft' });
+        socket.emit('draft:error', { message: clientMessage(error, 'Failed to start draft') });
       }
     });
 
@@ -358,10 +359,10 @@ async function handleTimerExpired(io: Server, leagueId: number) {
         });
       }
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Socket] Error processing autopick:', error);
     const roomName = `league:${leagueId}`;
-    io.to(roomName).emit('draft:error', { message: 'Autopick failed: ' + error.message });
+    io.to(roomName).emit('draft:error', { message: 'Autopick failed: ' + clientMessage(error, 'server error') });
   }
 }
 

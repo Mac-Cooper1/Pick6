@@ -2,6 +2,7 @@ import { Response } from 'express';
 import bcrypt from 'bcrypt';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
+import { errorMessage } from '../utils/errors';
 import prisma from '../lib/prisma';
 import { GameStatus } from '@prisma/client';
 import {
@@ -331,8 +332,8 @@ export async function repairSpreadsEndpoint(req: AuthRequest, res: Response) {
     let espn;
     try {
       espn = await fetchGameLine(game.espnEventId);
-    } catch (error: any) {
-      errors.push(`${label}: ${error.message}`);
+    } catch (error) {
+      errors.push(`${label}: ${errorMessage(error)}`);
       continue;
     }
     if (!espn) {

@@ -100,7 +100,7 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
   // Initialize queue from server
   useEffect(() => {
     if (userQueue) {
-      setQueue(userQueue.map((q: any) => q.teamId));
+      setQueue(userQueue.map((q) => q.teamId));
     }
   }, [userQueue]);
 
@@ -189,6 +189,10 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
         // Clear selection if the picked team was selected (functional read, no stale closure)
         setSelectedTeam(prev => (prev?.id === pick.teamId ? null : prev));
+
+        // The server drops a drafted team from every queue; mirror that now so
+        // the auto-queue effect never puts a drafted team back in yours
+        setQueue(prev => prev.filter(id => id !== pick.teamId));
 
         // Selecting a team writes its name into the search box. Once that
         // team is drafted the filter would match nothing and the board looks
@@ -286,19 +290,33 @@ export function DraftRoom({ leagueId }: DraftRoomProps) {
 
   // Timeout protection: while it's your turn, your selected team is silently
   // pinned to the front of your queue — if the clock hits zero, autopick
-  // drafts exactly that team instead of "best available".
-  const autoQueuedRef = useRef<number | null>(null);
+  // drafts exactly that team instead of "best available". The ref remembers
+  // where the pinned team came from (queuedAt: its spot in your queue, or -1
+  // if the pin added it), so moving off it puts a team you had queued
+  // yourself back in that spot instead of dropping it.
+  const autoQueuedRef = useRef<{ teamId: number; queuedAt: number } | null>(null);
   useEffect(() => {
     if (draftState?.onTheClockUserId !== user?.id) return;
     const sel = selectedTeam?.id ?? null;
     const prev = autoQueuedRef.current;
-    if (sel === prev) return;
+    if (sel === (prev?.teamId ?? null)) return;
 
-    let newQueue = queue.filter((id) => id !== prev && id !== sel);
-    if (sel !== null) {
-      newQueue = [sel, ...newQueue];
+    let newQueue = [...queue];
+    if (prev) {
+      // Still queued = not drafted or removed meanwhile
+      const stillQueued = newQueue.includes(prev.teamId);
+      newQueue = newQueue.filter((id) => id !== prev.teamId);
+      if (stillQueued && prev.queuedAt >= 0) {
+        newQueue.splice(Math.min(prev.queuedAt, newQueue.length), 0, prev.teamId);
+      }
     }
-    autoQueuedRef.current = sel;
+    if (sel !== null) {
+      const queuedAt = newQueue.indexOf(sel);
+      newQueue = [sel, ...newQueue.filter((id) => id !== sel)];
+      autoQueuedRef.current = { teamId: sel, queuedAt };
+    } else {
+      autoQueuedRef.current = null;
+    }
     setQueue(newQueue);
     socketUpdateQueue(leagueId, newQueue);
   }, [selectedTeam, draftState?.onTheClockUserId, user?.id, queue, leagueId]);

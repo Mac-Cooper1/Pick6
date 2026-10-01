@@ -4,8 +4,9 @@
  * Provides cached access to ESPN scoreboard data
  */
 
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
+import { asyncHandler } from '../utils/asyncHandler';
 import cacheService, { CACHE_TTL } from '../services/cacheService';
 import {
   fetchScoreboard,
@@ -18,10 +19,6 @@ import {
 } from '../services/espnClient';
 
 const router = Router();
-
-// Helper for async route handlers
-const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) =>
-  (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req, res, next)).catch(next);
 
 /**
  * GET /api/cfb/scoreboard
