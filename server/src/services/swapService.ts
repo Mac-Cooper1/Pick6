@@ -29,6 +29,7 @@ import { getAvailableTeams } from './rosterService';
 import { syncSeasonCalendar } from './seasonService';
 import { gamesForTeamWeek, loadScoringWeekMap, seasonRecord } from './scoringWeekService';
 import { getStandings } from './standingsService';
+import { errorMessage } from '../utils/errors';
 
 export const SWAP_WEEK = 6; // new teams count from here; lists run at its start
 export const SWAP_MAX_CLAIMS = 10;
@@ -516,9 +517,9 @@ export async function runDueSwaps(
     try {
       const result = await runSwap(id, now);
       if (result) results.push(result);
-    } catch (e: any) {
-      console.error(`[Swap] Run failed for league ${id}: ${e.message}`);
-      results.push({ leagueId: id, members: 0, swaps: 0, error: e.message });
+    } catch (e) {
+      console.error(`[Swap] Run failed for league ${id}: ${errorMessage(e)}`);
+      results.push({ leagueId: id, members: 0, swaps: 0, error: errorMessage(e) });
     }
   }
   return results;

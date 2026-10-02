@@ -23,7 +23,7 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
 
     req.userId = payload.userId;
     next();
-  } catch (error) {
+  } catch {
     return res.status(401).json({
       error: 'Unauthorized',
       message: 'Invalid or expired token',

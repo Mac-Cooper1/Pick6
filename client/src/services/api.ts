@@ -14,6 +14,7 @@ import type {
   Standing,
   ErrorResponse,
 } from '../types';
+import type { DraftState } from './socket';
 
 // Same-origin by default: in dev the Vite proxy forwards /api, and in
 // production the Express server serves this bundle itself (single-service
@@ -60,6 +61,16 @@ api.interceptors.response.use(
   }
 );
 
+/** The server's message for a failed API call (its ErrorResponse), else the fallback */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  return (axios.isAxiosError<ErrorResponse>(err) && err.response?.data?.message) || fallback;
+}
+
+/** The HTTP status of a failed API call, if it got a response */
+export function apiErrorStatus(err: unknown): number | undefined {
+  return axios.isAxiosError(err) ? err.response?.status : undefined;
+}
+
 // Auth API
 export const authApi = {
   register: async (name: string, email: string, password: string): Promise<AuthResponse> => {
@@ -104,6 +115,16 @@ export interface MyLeague {
   members: Array<{ id: number; name: string; role: string; draftPosition: number | null }>;
 }
 
+// PATCH /leagues/:id/settings response
+export interface LeagueSettingsResult {
+  id: number;
+  name: string;
+  draftScheduledAt: string | null;
+  draftStatus: MyLeague['draftStatus'];
+  pickDeadlineSeconds: number;
+  memberOrder: Array<{ userId: number; draftPosition: number }> | null;
+}
+
 // League API
 export const leagueApi = {
   createLeague: async (leagueData: CreateLeagueData): Promise<League> => {
@@ -135,8 +156,8 @@ export const leagueApi = {
     draftScheduledAt?: string | null;
     pickDeadlineSeconds?: number;
     draftOrder?: number[] | 'randomize';
-  }): Promise<any> => {
-    const { data } = await api.patch(`/leagues/${leagueId}/settings`, settings);
+  }): Promise<LeagueSettingsResult> => {
+    const { data } = await api.patch<LeagueSettingsResult>(`/leagues/${leagueId}/settings`, settings);
     return data;
   },
 };
@@ -153,16 +174,25 @@ export const draftApi = {
     return data;
   },
 
-  getDraftState: async (leagueId: number): Promise<any> => {
-    const { data } = await api.get(`/draft/${leagueId}/state`);
+  getDraftState: async (leagueId: number): Promise<DraftState> => {
+    const { data } = await api.get<DraftState>(`/draft/${leagueId}/state`);
     return data;
   },
 
-  getQueue: async (leagueId: number): Promise<any[]> => {
-    const { data } = await api.get(`/draft/${leagueId}/queue`);
+  getQueue: async (leagueId: number): Promise<DraftQueueEntry[]> => {
+    const { data } = await api.get<DraftQueueEntry[]>(`/draft/${leagueId}/queue`);
     return data;
   },
 };
+
+// A team on your draft queue (GET /draft/:id/queue), first choice first
+export interface DraftQueueEntry {
+  teamId: number;
+  teamName: string;
+  conference: string;
+  slot: ConferenceSlot;
+  priority: number;
+}
 
 // Standings API
 export interface SeasonGridWeek {
@@ -316,13 +346,26 @@ export const swapApi = {
   },
 };
 
+// POST /admin/sync-week response (Settings' Sync Now)
+export interface SyncWeekResult {
+  success: boolean;
+  leagueId: number;
+  weekNumber: number;
+  seasonYear: number;
+  gamesCreated: number;
+  gamesUpdated: number;
+  oddsUpdated: number;
+  scoresCalculated: number;
+  errors: string[];
+}
+
 // Admin API (commissioner sync controls)
 export const adminApi = {
-  syncWeek: async (leagueId: number, weekNumber: number, seasonYear?: number): Promise<any> => {
+  syncWeek: async (leagueId: number, weekNumber: number, seasonYear?: number): Promise<SyncWeekResult> => {
     const url = seasonYear
       ? `/admin/sync-week/${leagueId}/${weekNumber}?seasonYear=${seasonYear}`
       : `/admin/sync-week/${leagueId}/${weekNumber}`;
-    const { data } = await api.post(url);
+    const { data } = await api.post<SyncWeekResult>(url);
     return data;
   },
 };

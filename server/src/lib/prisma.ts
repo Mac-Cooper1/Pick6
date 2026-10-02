@@ -29,8 +29,8 @@ export async function testDatabaseConnection(): Promise<void> {
     // Simple query to test connection
     await client.$queryRaw`SELECT 1`;
     console.log('✅ Database connection established successfully');
-  } catch (error: any) {
-    const errorMessage = error.message || String(error);
+  } catch (error) {
+    const errorMessage = (error instanceof Error && error.message) || String(error);
 
     // Parse common Prisma/PostgreSQL errors and provide actionable messages
     if (errorMessage.includes('Tenant or user not found')) {
@@ -38,7 +38,8 @@ export async function testDatabaseConnection(): Promise<void> {
         `Database connection failed: Invalid database host or tenant.\n` +
         `  - If using Supabase: Check that your project still exists and DATABASE_URL is correct\n` +
         `  - If using local Postgres: Run 'docker-compose up -d' and update DATABASE_URL\n` +
-        `  Current DATABASE_URL host: ${getDatabaseHost()}`
+        `  Current DATABASE_URL host: ${getDatabaseHost()}`,
+        { cause: error }
       );
     }
 
@@ -46,7 +47,8 @@ export async function testDatabaseConnection(): Promise<void> {
       throw new Error(
         `Database connection failed: Invalid credentials.\n` +
         `  - Check POSTGRES_PASSWORD matches your database\n` +
-        `  - For local development: docker-compose down -v && docker-compose up -d`
+        `  - For local development: docker-compose down -v && docker-compose up -d`,
+        { cause: error }
       );
     }
 
@@ -55,7 +57,8 @@ export async function testDatabaseConnection(): Promise<void> {
         `Database connection failed: Cannot connect to database server.\n` +
         `  - For local Postgres: Run 'docker-compose up -d'\n` +
         `  - For remote database: Check host/port in DATABASE_URL\n` +
-        `  Current DATABASE_URL host: ${getDatabaseHost()}`
+        `  Current DATABASE_URL host: ${getDatabaseHost()}`,
+        { cause: error }
       );
     }
 
@@ -63,7 +66,8 @@ export async function testDatabaseConnection(): Promise<void> {
       throw new Error(
         `Database connection failed: Database does not exist.\n` +
         `  - Run 'npx prisma migrate deploy' to create the database schema\n` +
-        `  - Or check DATABASE_URL points to the correct database name`
+        `  - Or check DATABASE_URL points to the correct database name`,
+        { cause: error }
       );
     }
 
@@ -72,7 +76,8 @@ export async function testDatabaseConnection(): Promise<void> {
         `Database connection failed: Connection timed out.\n` +
         `  - Check network connectivity to database host\n` +
         `  - Verify firewall rules allow connection\n` +
-        `  Current DATABASE_URL host: ${getDatabaseHost()}`
+        `  Current DATABASE_URL host: ${getDatabaseHost()}`,
+        { cause: error }
       );
     }
 
@@ -80,20 +85,18 @@ export async function testDatabaseConnection(): Promise<void> {
     throw new Error(
       `Database connection failed: ${errorMessage}\n` +
       `  - Check DATABASE_URL environment variable is set correctly\n` +
-      `  - For local development: Run 'docker-compose up -d'`
+      `  - For local development: Run 'docker-compose up -d'`,
+      { cause: error }
     );
   }
 }
 
 // Helper to extract host from DATABASE_URL for error messages
+// (URL parsing ends the user info at the LAST '@', so a password containing
+// '@' can't leak into the message; the old first-'@' regex printed its tail)
 function getDatabaseHost(): string {
-  try {
-    const url = process.env.DATABASE_URL || '';
-    const match = url.match(/@([^:\/]+)/);
-    return match ? match[1] : 'unknown';
-  } catch {
-    return 'unknown';
-  }
+  const url = process.env.DATABASE_URL || '';
+  return (URL.canParse(url) && new URL(url).hostname) || 'unknown';
 }
 
 // Graceful shutdown

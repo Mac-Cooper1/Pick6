@@ -517,7 +517,7 @@ export async function processAutoPick(leagueId: number) {
     });
 
     if (availableTeams.length > 0) {
-      let rankings: Map<string, number> | null = null;
+      let rankings: Map<string, number> | null;
       try {
         rankings = await getRankingsMap();
       } catch {

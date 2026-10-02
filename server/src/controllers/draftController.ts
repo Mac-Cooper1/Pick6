@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
+import { clientMessage } from '../utils/errors';
 import prisma from '../lib/prisma';
 import { MemberRole, ConferenceSlot } from '@prisma/client';
 import {
@@ -110,8 +111,8 @@ export async function startDraftEndpoint(req: AuthRequest, res: Response) {
   try {
     const result = await startDraft(leagueId);
     res.json(result);
-  } catch (error: any) {
-    throw new AppError(error.message || 'Failed to start draft', 400);
+  } catch (error) {
+    throw new AppError(clientMessage(error, 'Failed to start draft'), 400);
   }
 }
 

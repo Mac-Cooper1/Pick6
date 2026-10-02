@@ -2,7 +2,14 @@ import { Response } from 'express';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import prisma from '../lib/prisma';
-import { getSwapState, getSwapTeams, saveSwapClaims } from '../services/swapService';
+import { getSwapState, getSwapTeams, saveSwapClaims, SwapLine } from '../services/swapService';
+import { clientMessage } from '../utils/errors';
+
+// One line of a submitted list: two integer team ids
+function isSwapLine(c: unknown): c is SwapLine {
+  const line = c as Partial<SwapLine> | null;
+  return Number.isInteger(line?.dropTeamId) && Number.isInteger(line?.addTeamId);
+}
 
 async function requireMembership(leagueId: number, userId: number) {
   if (isNaN(leagueId)) {
@@ -53,10 +60,7 @@ export async function saveSwapClaimsEndpoint(req: AuthRequest, res: Response) {
 
   await requireMembership(leagueId, userId);
 
-  if (
-    !Array.isArray(claims) ||
-    claims.some((c: any) => !Number.isInteger(c?.dropTeamId) || !Number.isInteger(c?.addTeamId))
-  ) {
+  if (!Array.isArray(claims) || !claims.every(isSwapLine)) {
     throw new AppError('claims must be a list of { dropTeamId, addTeamId }', 400);
   }
 
@@ -64,10 +68,10 @@ export async function saveSwapClaimsEndpoint(req: AuthRequest, res: Response) {
     const state = await saveSwapClaims(
       leagueId,
       userId,
-      claims.map((c: any) => ({ dropTeamId: c.dropTeamId, addTeamId: c.addTeamId }))
+      claims.map((c: SwapLine) => ({ dropTeamId: c.dropTeamId, addTeamId: c.addTeamId }))
     );
     res.json(state);
-  } catch (error: any) {
-    throw new AppError(error.message || 'Could not save your swap list', 400);
+  } catch (error) {
+    throw new AppError(clientMessage(error, 'Could not save your swap list'), 400);
   }
 }

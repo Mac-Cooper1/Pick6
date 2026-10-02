@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { apiErrorMessage, apiErrorStatus } from '../services/api';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { ErrorMessage } from '../components/ErrorMessage';
@@ -11,6 +12,25 @@ type AuthMode = 'signin' | 'signup';
 // Manual reset path until we have a domain + email sending (see NOTES.md)
 const FORGOT_EMAIL = 'mac.cooper002@gmail.com';
 
+/**
+ * A `?next=` value that stays on this site, or null. Resolving it against
+ * our own origin catches every way a browser reads a path as another host:
+ * "//evil.com", "/\evil.com" (a backslash counts as a slash) and
+ * "/<tab>/evil.com" (tabs and newlines are dropped). The result is checked
+ * too: resolving dot segments turns "/.//evil.com" or "/%2e//evil.com" into
+ * "//evil.com", which is another host again.
+ */
+function internalPath(raw: string | null): string | null {
+  if (!raw?.startsWith('/')) return null;
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.origin !== window.location.origin || url.pathname.startsWith('//')) return null;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
 export function Login() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -20,8 +40,7 @@ export function Login() {
 
   // Post-auth destination (set by ProtectedRoute / the 401 interceptor, e.g.
   // a shared join link). Internal paths only — never a full URL.
-  const rawNext = params.get('next');
-  const nextPath = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : null;
+  const nextPath = internalPath(params.get('next'));
   const destination = nextPath || '/dashboard';
   // Collected as first + last but stored as one name: the User table keeps a
   // single (live, prod) name column, so the split lives only in this form
@@ -75,21 +94,21 @@ export function Login() {
         try {
           await login(email, password);
           navigate(destination);
-        } catch (err: any) {
-          if (err.response?.status === 401) {
+        } catch (err) {
+          if (apiErrorStatus(err) === 401) {
             setError('Invalid email or password.');
           } else {
-            setError(err.response?.data?.message || 'Login failed');
+            setError(apiErrorMessage(err, 'Login failed'));
           }
           setIsLoading(false);
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       // Handle registration errors
-      if (err.response?.status === 409) {
+      if (apiErrorStatus(err) === 409) {
         setError('An account with this email already exists. Please sign in instead.');
       } else {
-        setError(err.response?.data?.message || 'An error occurred');
+        setError(apiErrorMessage(err, 'An error occurred'));
       }
       setIsLoading(false);
     }

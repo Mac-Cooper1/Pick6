@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
+import { apiErrorMessage, leagueApi, matchupApi, cfbApi, TeamMatchup } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { SwapBadge } from './SwapBadge';
@@ -41,7 +41,8 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
   // Fetch matchups for all members
   const {
     data: allMatchups,
-    isLoading: matchupsLoading,
+    isPending: matchupsPending,
+    isError: matchupsFailed,
   } = useQuery({
     queryKey: ['allMatchups', leagueId],
     queryFn: () => matchupApi.getAllMatchups(leagueId),
@@ -96,7 +97,7 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
     return (
       <div className="p-4 sm:p-6">
         <ErrorMessage
-          message={(leagueError as any)?.response?.data?.message || 'Failed to load league data'}
+          message={apiErrorMessage(leagueError, 'Failed to load league data')}
         />
       </div>
     );
@@ -149,10 +150,15 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                     const now = new Date();
                     const isBowlSeason = (now.getMonth() === 11 && now.getDate() > 10) || now.getMonth() === 0;
 
-                    // Format opponent display
+                    // Format opponent display. Until matchups load (or if
+                    // they fail) say that, not "No Game", which reads as a bye
                     let opponentDisplay = 'No Game';
                     if (game) {
                       opponentDisplay = `${game.isHomeTeam ? 'vs.' : '@'} ${game.opponentAbbreviation || game.opponent}`;
+                    } else if (!matchup && matchupsPending) {
+                      opponentDisplay = 'Loading...';
+                    } else if (!matchup && matchupsFailed) {
+                      opponentDisplay = "Couldn't load games";
                     } else if (isBowlSeason) {
                       opponentDisplay = 'Season Over';
                     }

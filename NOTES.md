@@ -77,17 +77,21 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## Parking lot
 
-- **ESLint across the repo** (Mac OK'd adding it, Sep 30; saved for later).
-  The client has a `lint` script and ESLint 8 devDependencies but no config
-  file, so `npm run lint` fails; the server has neither. Expect a first
-  pass of fixes before `--max-warnings 0` can gate anything.
-- **`npm audit` findings** (Sep 30, saved for later): Render's deploy log
-  reports 13 vulnerabilities (3 moderate, 9 high, 1 critical) right before
-  `Prisma schema loaded`, i.e. the server's `npm ci` (the build runs
-  `prisma generate` next; the client's install prints its own audit summary
-  later in the same log). Read `npm audit` in both first:
-  sort runtime from dev-only packages and check what `npm audit fix` would
-  bump (a major bump can break the build) before applying anything.
+- **Client major upgrades the audit still lists (2027 offseason, or a quiet
+  week).** After Sep 30's fixes `npm audit` shows 4 in `client/` (vite,
+  esbuild, react-router, react-router-dom), all needing a major version.
+  Vite 5 -> 6.4.3+ (8 is latest; 8 also needs @vitejs/plugin-react 6)
+  clears dev-server bugs that never reach production (it serves the built
+  files from Express, not Vite). React Router 6 -> 7.18+ DOES ship to
+  production: it clears an SSR-only advisory (no SSR here) and an open
+  redirect through user-controlled navigation targets. The only such
+  target is Login's `?next=`, guarded by `internalPath` (which also
+  rejects results starting with `//`); any new user-controlled
+  navigate()/Link target makes this upgrade urgent. Do them as their own
+  change with a full browser pass, not mixed into a fix. The server is at
+  0. Dependabot alerts + security updates should be on (GitHub Settings ->
+  Advanced Security) so new advisories open PRs instead of waiting for
+  someone to read a deploy log.
 
 - **Drop the dead turn-based swap columns (2027 offseason).** The Sep 30
   week-6 swap left `League.swapStatus`, `League.swapTurnDeadline`,

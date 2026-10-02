@@ -1,12 +1,14 @@
 {
   "name": "pick6-server",
   "version": "1.0.0",
+  "private": true,
   "description": "Backend server for Pick 6 fantasy college football",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "lint": "eslint . --max-warnings 0",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
@@ -19,7 +21,7 @@
     "college"
   ],
   "author": "",
-  "license": "MIT",
+  "license": "SEE LICENSE IN ../LICENSE.md",
   "dependencies": {
     "@prisma/client": "^5.9.1",
     "@types/bcrypt": "^6.0.0",
@@ -28,17 +30,21 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.9.1",
     "@types/socket.io": "^3.0.1",
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
+    "prisma": "^5.9.1",
     "socket.io": "^4.8.1",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "prisma": "^5.9.1"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "typescript-eslint": "^8.71.0"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

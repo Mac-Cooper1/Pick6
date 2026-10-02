@@ -101,8 +101,17 @@ turn — standing instruction from Mac)**.
   `order-N` on the panels; desktop keeps DOM order). Visible UI copy: no
   em-dashes (periods/commas/colons instead), light theme only (dark mode is
   parked in NOTES.md).
-- **Production = ONE Render service** (`render.yaml` blueprint): Express
-  serves `client/dist` with an SPA fallback → everything same-origin, **no
+- **The repo is public** (Sep 30) under `LICENSE.md`: Pick 6's own
+  source-available terms (read, change, share, run privately; no hosting
+  for others, no packaging, no commercial or competing use; contributions
+  licensed to Mac). Both `package.json` files say `SEE LICENSE IN
+  ../LICENSE.md`. Never commit secrets: `.env` files and
+  `.claude/db-access.md` are git-ignored, and on Sep 30 no secret value
+  appeared anywhere in git history.
+- **Production = ONE Render service** (`render.yaml` blueprint) at
+  https://pick6-o4qw.onrender.com (the "official Pick 6" LICENSE.md and the
+  README point to), on the Node major in the root `.node-version` (CI reads
+  the same file): Express serves `client/dist` with an SPA fallback → everything same-origin, **no
   CORS config, no VITE_API_URL** (that env var exists only as a split-deploy
   override; leave it unset). Postgres = `pick6-db` (Basic plan). Scheduled
   scoring = GitHub Actions cron (`.github/workflows/sync.yml`, 3 schedules)
@@ -155,8 +164,27 @@ which game it opens on, the schedule cache timing, the Game-row-only fallback: E
 so the card's end-to-end checks run exactly like an ESPN outage). It wipes/recreates its own data (league `SMOKE1`,
 `smoke1@test.local`/`smoke123`) in its **own season year 2099** with a
 copied calendar, so real Game rows synced into the local DB can never
-collide with its synthetic games — **never point it at prod**. Before ending a turn: `npx tsc` in `server/`, `npm run build` in
+collide with its synthetic games — **never point it at prod**. Before ending a turn: `npm run lint` in both packages, `npx tsc` in `server/`, `npm run build` in
 `client/`.
+
+**Lint + PR check (Sep 30)**: ESLint 10 flat configs (`client/eslint.config.js`,
+`server/eslint.config.mjs`), `npm run lint` = `--max-warnings 0`. Deliberate
+choices: no `any`, except the server files that parse untyped ESPN/Odds
+JSON (espnClient, oddsClient, seasonService) and scripts/ + prisma/ (a
+`files` override in the server config). Caught errors are `unknown`: the
+server goes through `utils/errors.ts` (`errorMessage` for logs/admin text,
+`clientMessage` for anything a client sees, which hides Prisma's text), the
+client through `apiErrorMessage`/`apiErrorStatus` in `services/api.ts`.
+React hooks = the classic two rules only (the plugin's React Compiler
+rules assume a compiler this app doesn't use); unused args may be
+`_`-prefixed (Express's 4-argument error handler). The global error
+handler only sends AppError and Express 4xx messages; anything else is a
+generic 500 with details in the log. The server's tsconfig `lib` is ES2022
+so `new Error(msg, { cause })` types; `target` stays ES2020.
+`.github/workflows/checks.yml` runs on every PR and push to `main`: server
+lint + `tsc`, then `prisma migrate deploy` against a throwaway Postgres
+service and a boot + `/health` check; client lint + `vite build`. It can't
+run the smoke test (needs seeded teams and live ESPN).
 
 **Phone-viewport checks** (no device needed): headless Chrome is installed —
 drive it with `puppeteer-core` from the scratchpad, mint a JWT for a test
@@ -174,9 +202,12 @@ connects. Tabs are component state, not routes — click the button by label.
 - **Prisma error "Tenant or user not found"** = a dead Supabase pooler URL
   leaked into `DATABASE_URL` (the December corpse). Prod must always use the
   Render-internal Postgres URL.
-- **Render exports `NODE_ENV=production`**, so `npm ci` skips devDependencies
-  — build commands must use `--include=dev` (prisma/vite/typescript live
-  there). Never use Render's free Postgres (self-deletes after 30 days).
+- **Render exports `NODE_ENV=production`**, so `npm ci` skips devDependencies.
+  The server keeps everything its build and preDeploy need (prisma,
+  typescript, tsx) in `dependencies` and installs without dev tooling; the
+  client's install uses `--include=dev` (vite/typescript live there). A new
+  server build-time package belongs in `dependencies`, or Render's build
+  breaks. Never use Render's free Postgres (self-deletes after 30 days).
 - **The odds matcher must never "match" on ignorance.** Until Sep 11 it
   compared alias-table lookups with `===`, so two un-aliased teams gave
   `null === null` and any same-kickoff game could inherit another game's
@@ -321,4 +352,22 @@ league shows real points. Same night after Mac merged it (PR #19): one
 Season tab instead of Game Log + Schedule, the League tab opens the card,
 and the speed/ESPN-safety pass on `teamCardService`'s cache. Mac OK'd two
 follow-ups for later (NOTES.md parking lot): ESLint across the repo and
-the `npm audit` findings in Render's deploy log.
+the `npm audit` findings in Render's deploy log. Both done right after
+PR #20: `npm audit` server 14 -> 0 (bcrypt 5 -> 6: same `hash`/`compare`,
+prebuilt binaries instead of the install-time downloader that pulled in
+the critical `tar`; bcrypt-5 hashes verified to log in), client 30 -> 4
+(major-version-only; vite/esbuild are dev-server-only, React Router ships
+but its open redirect only matters for user-controlled navigation targets,
+of which Login's `?next=` is the only one; parked in NOTES.md); Login's
+`?next=` now goes through `internalPath` (resolved against our origin, so
+`/\evil.com` and tab tricks can't redirect off-site); ESLint + the PR check
+above. Oct 1: a max-effort code review of PR #21 found 15 issues, all fixed
+except Dependabot (a GitHub settings toggle for Mac): `internalPath` also
+rejects results starting with `//` (`/.//evil.com` resolved to
+`//evil.com`); the error handler stops returning Prisma text; the draft
+room's auto-queue keeps teams you queued yourself; League tab tiles say
+Loading/Couldn't load instead of "No Game"; Node pinned to 22 via
+`.node-version`; `getDatabaseHost` parses the URL; MIT notice for
+`.agents/skills`; `"private": true`; CI applies migrations and boots the
+server; Render's server install skips dev tooling; `no-explicit-any` is on
+outside the JSON-parsing files.

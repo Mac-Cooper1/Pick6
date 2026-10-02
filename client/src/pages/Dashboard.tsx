@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CaretRight } from '@phosphor-icons/react';
 import { useAuth } from '../contexts/AuthContext';
-import { leagueApi, MyLeague } from '../services/api';
+import { apiErrorMessage, leagueApi, MyLeague } from '../services/api';
 import { Loading } from '../components/Loading';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { Button } from '../components/Button';
@@ -26,8 +26,8 @@ export function Dashboard() {
       setError(null);
       const data = await leagueApi.getMyLeagues();
       setLeagues(data);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to load leagues');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to load leagues'));
     } finally {
       setLoading(false);
     }

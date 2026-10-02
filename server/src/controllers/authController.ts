@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import { generateToken } from '../utils/auth';
 import { AuthRequest } from '../types';
@@ -30,7 +30,7 @@ function normalizeName(raw: unknown): string {
  * POST /api/auth/register
  * Body: { name: string, email: string, password: string }
  */
-export async function register(req: Request, res: Response, next: any) {
+export async function register(req: Request, res: Response, next: NextFunction) {
   try {
     const { name, email, password } = req.body;
 
@@ -87,7 +87,7 @@ export async function register(req: Request, res: Response, next: any) {
  * POST /api/auth/login
  * Body: { email: string, password: string }
  */
-export async function login(req: Request, res: Response, next: any) {
+export async function login(req: Request, res: Response, next: NextFunction) {
   try {
     const { email, password } = req.body;
 
@@ -128,7 +128,7 @@ export async function login(req: Request, res: Response, next: any) {
  * PATCH /api/auth/me
  * Protected route. Body: { name: string }
  */
-export async function updateCurrentUser(req: AuthRequest, res: Response, next: any) {
+export async function updateCurrentUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
     const normalizedName = normalizeName(req.body?.name);
@@ -153,7 +153,7 @@ export async function updateCurrentUser(req: AuthRequest, res: Response, next: a
  * GET /api/auth/me
  * Protected route
  */
-export async function getCurrentUser(req: AuthRequest, res: Response, next: any) {
+export async function getCurrentUser(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const userId = req.userId!;
 

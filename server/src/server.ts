@@ -9,6 +9,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { validateEnv } from './lib/env';
 import { testDatabaseConnection, disconnectPrisma } from './lib/prisma';
 import { initDraftSocket, setIOInstance } from './socket/draftSocket';
+import { errorMessage } from './utils/errors';
 
 // Load environment variables FIRST
 dotenv.config();
@@ -105,9 +106,9 @@ async function startServer() {
       console.log(`🔗 API base: http://localhost:${PORT}/api`);
       console.log(`🔌 Socket.IO enabled for live draft`);
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('\n❌ Server startup failed:');
-    console.error(error.message);
+    console.error(errorMessage(error));
     process.exit(1);
   }
 }

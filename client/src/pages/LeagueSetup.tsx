@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { leagueApi } from '../services/api';
+import { apiErrorMessage, leagueApi } from '../services/api';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { ErrorMessage } from '../components/ErrorMessage';
@@ -59,8 +59,8 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
       });
 
       navigate(`/league/${league.id}`);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to create league');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to create league'));
     } finally {
       setIsLoading(false);
     }
@@ -83,8 +83,8 @@ export function LeagueSetup({ mode }: LeagueSetupProps) {
       });
 
       navigate(`/league/${league.id}`);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to join league');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to join league'));
     } finally {
       setIsLoading(false);
     }
