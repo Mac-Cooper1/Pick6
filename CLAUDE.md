@@ -66,10 +66,11 @@ turn — standing instruction from Mac)**.
   `/league/:id` (tabs). Tabs: Leaderboard (default) · My Team (your five +
   weekly games with kickoff/venue/network/spread) ·
   Week by Week (grid + per-week drill-down) — tapping a My Team card, a
-  drill-down tile or a League tab tile opens `components/TeamCard.tsx`
-  (portaled sheet, ESPN fantasy player-card style: Matchup / Season / News
-  tabs; Season = results and upcoming games in one list, right column is
-  Pick 6 points only) ·
+  drill-down tile, a League tab tile or a Week 6 Swap board row opens
+  `components/TeamCard.tsx` (portaled sheet, ESPN fantasy player-card
+  style: Matchup / Season / News tabs; Season = results and upcoming games
+  in one list, right column is Pick 6 points only; an unowned team has no
+  owner, so nothing greys out) ·
   League (current rosters +
   spreads; `SwapBadge` marks swapped-in teams here, on My Team and in Week
   by Week) ·
