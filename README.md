@@ -182,6 +182,11 @@ Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome 
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
 
+**Oct 2, 2026** — Custom domain: **https://pick6cfb.com** is live:
+- Registered at Cloudflare Registrar (at-cost renewals, free WHOIS privacy). DNS at Cloudflare: CNAME `@` and `www` → `pick6-o4qw.onrender.com`, both **DNS only** (grey cloud) so Render issues and renews the certificate. Added under Render → pick6 → Settings → Custom Domains; `www` 301s to the bare domain.
+- No code change: the app is same-origin and builds share/login links from `window.location.origin`. The old `onrender.com` URL still works but is retired from use. Logins live in each domain's own browser storage, so everyone signs in once on the new domain.
+- Email plan (not built yet): Cloudflare Email Routing forwards inbound mail to Gmail; Resend's free tier sends the automations.
+
 **Oct 1, 2026** — Fixes from a full code review of PR #21 (15 findings; everything but Dependabot, which is a GitHub settings toggle):
 - **Login redirect, closed for real**: `?next=/.//evil.com` (or `/%2e//evil.com`, `/x/..//evil.com`) passed the same-site check and resolved to `//evil.com`, which a browser reads as another host. Only React Router 6.30.6 collapsing `//` kept it on-site. `internalPath` now also rejects any result starting with `//`
 - **No more database details in error responses**: the global error handler returned any error's raw message, so during a database outage clients saw Prisma's text (internal DB host and port, model and query). Now only AppErrors and Express's own 4xx messages go to the client; anything else is a generic 500 with the details in the log. Controllers and the draft socket that pass a service's message through use `clientMessage()`, which hides Prisma's text the same way

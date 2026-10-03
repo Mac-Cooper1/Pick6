@@ -4,7 +4,7 @@
 # calendar and does games → odds → finalize → rescore for every league.
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
-#   API_URL       e.g. https://pick6-api.onrender.com   (no trailing slash)
+#   API_URL       e.g. https://pick6cfb.com   (no trailing slash)
 #   ADMIN_SECRET  same value as the server's ADMIN_SECRET env var
 #
 # Schedules (UTC; GitHub cron may drift a few minutes):

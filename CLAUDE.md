@@ -113,7 +113,15 @@ turn — standing instruction from Mac)**.
   README point to), on the Node major in the root `.node-version` (CI reads
   the same file): Express serves `client/dist` with an SPA fallback → everything same-origin, **no
   CORS config, no VITE_API_URL** (that env var exists only as a split-deploy
-  override; leave it unset). Postgres = `pick6-db` (Basic plan). Scheduled
+  override; leave it unset). **Domain: `pick6cfb.com`** (Oct 2), bought at
+  Cloudflare Registrar, DNS at Cloudflare: CNAMEs `@` and `www` →
+  `pick6-o4qw.onrender.com`, **DNS only (grey cloud)**, never proxied
+  (Render issues the cert; proxying breaks it). Render redirects `www` to
+  the bare domain. The `onrender.com` URL still answers but nobody uses it;
+  no redirect code, the app is domain-agnostic (links come from
+  `window.location.origin`). Email plan (not built yet): Cloudflare Email
+  Routing forwards inbound to Mac's Gmail, Resend free tier sends.
+  Postgres = `pick6-db` (Basic plan). Scheduled
   scoring = GitHub Actions cron (`.github/workflows/sync.yml`, 3 schedules)
   hitting `POST /api/admin/sync-current` with the `x-admin-secret` header.
   Admin routes accept that secret OR a commissioner JWT.
