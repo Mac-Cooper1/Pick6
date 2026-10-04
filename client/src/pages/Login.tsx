@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { apiErrorMessage, apiErrorStatus } from '../services/api';
+import { apiErrorMessage, apiErrorStatus, authApi } from '../services/api';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { Logo } from '../components/Logo';
 
 type AuthMode = 'signin' | 'signup';
-
-// Manual reset path until we have a domain + email sending (see NOTES.md)
-const FORGOT_EMAIL = 'mac.cooper002@gmail.com';
 
 /**
  * A `?next=` value that stays on this site, or null. Resolving it against
@@ -50,7 +47,12 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showForgot, setShowForgot] = useState(false);
+  // ?forgot=1 opens the reset form (the reset page's "request a new link")
+  const [showForgot, setShowForgot] = useState(params.get('forgot') === '1');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [forgotSending, setForgotSending] = useState(false);
+  const [forgotSentTo, setForgotSentTo] = useState('');
 
   if (!authLoading && user) return <Navigate to={destination} replace />;
 
@@ -61,6 +63,32 @@ export function Login() {
     if (mode === 'signup') nextParams.mode = mode;
     if (nextPath) nextParams.next = nextPath;
     setParams(nextParams, { replace: true });
+  };
+
+  const openForgot = () => {
+    setForgotEmail(email);
+    setForgotError('');
+    setForgotSentTo('');
+    setShowForgot(true);
+  };
+
+  const handleForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const address = forgotEmail.trim();
+    if (!address) {
+      setForgotError('Enter the email you signed up with');
+      return;
+    }
+    setForgotError('');
+    setForgotSending(true);
+    try {
+      await authApi.forgotPassword(address);
+      setForgotSentTo(address);
+    } catch (err) {
+      setForgotError(apiErrorMessage(err, 'Could not send the email. Try again in a minute.'));
+    } finally {
+      setForgotSending(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -213,7 +241,7 @@ export function Login() {
                   <div className="mt-1.5 text-right">
                     <button
                       type="button"
-                      onClick={() => setShowForgot(true)}
+                      onClick={openForgot}
                       className="text-sm font-semibold text-green-800 underline underline-offset-2"
                     >
                       Forgot password?
@@ -242,30 +270,55 @@ export function Login() {
             className="card w-full max-w-sm p-5 sm:p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="forgot-title" className="section-title text-xl mb-2">
-              Forgot your password?
-            </h2>
-            <p className="text-gray-600 leading-relaxed mb-5">
-              No self-serve reset yet. For now, just reach out to the dev with the
-              new password you'd like to reset it to.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button
-                fullWidth
-                onClick={() => {
-                  window.location.href = `mailto:${FORGOT_EMAIL}?subject=${encodeURIComponent(
-                    'Pick 6 password reset'
-                  )}&body=${encodeURIComponent(
-                    'Hey Mac, I forgot my Pick 6 password.\n\nMy account email: \nReset my password to: '
-                  )}`;
-                }}
-              >
-                Email the dev
-              </Button>
-              <Button variant="secondary" fullWidth onClick={() => setShowForgot(false)}>
-                Close
-              </Button>
-            </div>
+            {forgotSentTo ? (
+              <>
+                <h2 id="forgot-title" className="section-title text-xl mb-2">
+                  Check your email
+                </h2>
+                <p className="text-gray-600 leading-relaxed mb-3">
+                  If <span className="font-semibold text-gray-800 break-all">{forgotSentTo}</span> has
+                  a Pick 6 account, a reset link is on its way. It works for 1 hour.
+                </p>
+                <p className="text-sm text-gray-500 leading-relaxed mb-5">
+                  Nothing after a few minutes? Check your spam folder, or try again.
+                </p>
+                <Button fullWidth onClick={() => setShowForgot(false)}>
+                  Done
+                </Button>
+              </>
+            ) : (
+              <form onSubmit={handleForgot} noValidate>
+                <h2 id="forgot-title" className="section-title text-xl mb-2">
+                  Forgot your password?
+                </h2>
+                <p className="text-gray-600 leading-relaxed mb-4">
+                  Enter the email you signed up with and we'll send you a link to choose a new one.
+                </p>
+                {forgotError && (
+                  <div className="mb-4">
+                    <ErrorMessage message={forgotError} />
+                  </div>
+                )}
+                <Input
+                  label="Email"
+                  type="email"
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  autoFocus
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  required
+                />
+                <div className="flex flex-col sm:flex-row gap-3 mt-5">
+                  <Button type="submit" fullWidth disabled={forgotSending}>
+                    {forgotSending ? 'Sending...' : 'Send reset link'}
+                  </Button>
+                  <Button type="button" variant="secondary" fullWidth onClick={() => setShowForgot(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

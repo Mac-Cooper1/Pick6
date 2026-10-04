@@ -92,6 +92,17 @@ export const authApi = {
     const { data } = await api.patch<User>('/auth/me', { name });
     return data;
   },
+
+  // Always the same reply, whether or not the email has an account
+  forgotPassword: async (email: string): Promise<{ message: string }> => {
+    const { data } = await api.post<{ message: string }>('/auth/forgot-password', { email });
+    return data;
+  },
+
+  resetPassword: async (token: string, password: string): Promise<AuthResponse> => {
+    const { data } = await api.post<AuthResponse>('/auth/reset-password', { token, password });
+    return data;
+  },
 };
 
 // My Leagues response type

@@ -35,3 +35,42 @@ export function verifyToken(token: string): JWTPayload {
     throw new Error('Invalid token', { cause: error });
   }
 }
+
+// ---------- Password reset links ----------
+// Signed with JWT_SECRET plus the user's current password hash, so a link
+// stops working the moment the password changes: using one kills every
+// other outstanding link too, with nothing stored. The different secret
+// also means a reset token can never pass as a login token, or vice versa.
+
+const RESET_PURPOSE = 'password-reset';
+const RESET_TOKEN_TTL_SECONDS = 60 * 60; // the email says "1 hour"
+
+function resetSecret(passwordHash: string): string {
+  return `${getJwtSecret()}:${passwordHash}`;
+}
+
+export function generatePasswordResetToken(
+  userId: number,
+  passwordHash: string,
+  expiresInSeconds = RESET_TOKEN_TTL_SECONDS
+): string {
+  return jwt.sign({ userId, purpose: RESET_PURPOSE }, resetSecret(passwordHash), {
+    expiresIn: expiresInSeconds,
+  });
+}
+
+/** Whose reset token this claims to be (unverified: picks the hash to verify it with) */
+export function resetTokenUserId(token: string): number | null {
+  const payload = jwt.decode(token);
+  if (!payload || typeof payload !== 'object' || payload.purpose !== RESET_PURPOSE) return null;
+  return Number.isInteger(payload.userId) ? payload.userId : null;
+}
+
+export function verifyPasswordResetToken(token: string, passwordHash: string): boolean {
+  try {
+    const payload = jwt.verify(token, resetSecret(passwordHash), { algorithms: ['HS256'] });
+    return typeof payload === 'object' && payload.purpose === RESET_PURPOSE;
+  } catch {
+    return false;
+  }
+}

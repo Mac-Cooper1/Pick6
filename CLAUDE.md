@@ -59,10 +59,23 @@ turn — standing instruction from Mac)**.
   simultaneous requests share one call, and an ESPN error serves the last
   good copy and backs off 60s, so an outage leaves a card built from
   `Game` rows at worst), in-memory
-  `cacheService` (cleanup timer `unref`'d so scripts can exit).
+  `cacheService` (cleanup timer `unref`'d so scripts can exit),
+  `authService` (Oct 4: `findUserByEmail` = any case, exact otherwise, for
+  login, signup and reset; it's raw `lower(email) = lower($1)` because
+  Prisma's `mode: 'insensitive'` is ILIKE and `%`/`_` would be wildcards.
+  The forgot-password flow: a JWT signed with `JWT_SECRET` + the current
+  password hash, so a link dies when the password changes, single-use with
+  nothing stored; 1h links in the URL fragment; in-memory rate limits),
+  `emailService` (Resend HTTP API, no SDK; from
+  `Pick 6 <noreply@pick6cfb.com>`; no key = print to the log in dev, an
+  error without the link in production;
+  `captureEmails()` for the smoke test; `renderEmail` = the email layout,
+  escapes everything).
 - **Client**: React 18 + Vite + Tailwind + TanStack Query. Routes: `/` =
   marketing landing (signed-out; signed-in users bounce to `/dashboard`),
-  `/login` (`?mode=signup`), `/dashboard`, `/league/create|join`,
+  `/login` (`?mode=signup`, `?forgot=1` opens the reset form),
+  `/reset-password#token=` (emailed link; sets a password, signs in),
+  `/dashboard`, `/league/create|join`,
   `/league/:id` (tabs). Tabs: Leaderboard (default) · My Team (your five +
   weekly games with kickoff/venue/network/spread) ·
   Week by Week (grid + per-week drill-down) — tapping a My Team card, a
@@ -119,8 +132,11 @@ turn — standing instruction from Mac)**.
   (Render issues the cert; proxying breaks it). Render redirects `www` to
   the bare domain. The `onrender.com` URL still answers but nobody uses it;
   no redirect code, the app is domain-agnostic (links come from
-  `window.location.origin`). Email plan (not built yet): Cloudflare Email
-  Routing forwards inbound to Mac's Gmail, Resend free tier sends.
+  `window.location.origin`). Email (Oct 2): Cloudflare Email Routing
+  forwards inbound (Mac's and Johnny's addresses, catch-all) to Gmail;
+  Resend (free: 3,000/month, **100/day**, shared by the app and Mac's and
+  Johnny's Gmail "send as") sends, with `RESEND_API_KEY` on Render. The
+  app sends only password reset links so far, from `noreply@`.
   Postgres = `pick6-db` (Basic plan). Scheduled
   scoring = GitHub Actions cron (`.github/workflows/sync.yml`, 3 schedules)
   hitting `POST /api/admin/sync-current` with the `x-admin-secret` header.
@@ -161,7 +177,7 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 110 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 122 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
@@ -169,7 +185,10 @@ swap functions take a `now` so it stays date-independent), the SOS
 tiebreaker (both directions, unranked fallback) and the swap board, double-game
 week attribution, the odds matcher and the team card (ESPN/Game-row merge,
 which game it opens on, the schedule cache timing, the Game-row-only fallback: ESPN has no 2099 season,
-so the card's end-to-end checks run exactly like an ESPN outage). It wipes/recreates its own data (league `SMOKE1`,
+so the card's end-to-end checks run exactly like an ESPN outage), and the
+password reset (single use, expiry, rate limit, any-case but
+wildcard-proof lookup, login/reset token separation, HTML escaping; emails
+are captured in memory, nothing sends). It wipes/recreates its own data (league `SMOKE1`,
 `smoke1@test.local`/`smoke123`) in its **own season year 2099** with a
 copied calendar, so real Game rows synced into the local DB can never
 collide with its synthetic games — **never point it at prod**. Before ending a turn: `npm run lint` in both packages, `npx tsc` in `server/`, `npm run build` in
@@ -262,6 +281,11 @@ connects. Tabs are component state, not routes — click the button by label.
   on devices that can hover, so tapped buttons don't stick in their hover
   color — give tappable things an `active:` state instead. Inputs must stay
   ≥16px on phones or iOS Safari zooms the page on focus.
+- **This Mac's git-ignored `client/.env` sets `VITE_API_URL` to
+  `localhost:3001`**, and Vite bakes it into `npm run build`. A local build
+  served by a server on any other port calls 3001 for every API request
+  (fails with ERR_CONNECTION_REFUSED). Run the throwaway server on 3001,
+  or use the Vite dev server. Prod builds don't have the variable.
 
 ## How Mac works (respect this)
 
@@ -379,3 +403,15 @@ Loading/Couldn't load instead of "No Game"; Node pinned to 22 via
 `.agents/skills`; `"private": true`; CI applies migrations and boots the
 server; Render's server install skips dev tooling; `no-explicit-any` is on
 outside the JSON-parsing files.
+**Oct 2**: domain `pick6cfb.com` live (see Production above). **Oct 4**:
+forgot password by email (replaced "Email the dev"), with any-case email
+matching. Mac's call: one thing at a time, so swap reminder/result emails
+were built, then pulled before shipping; the design is parked in NOTES.md
+with the other email ideas. This Mac's local DB still has that unused
+`EmailLog` table and its `_prisma_migrations` row (folder deleted;
+harmless, `migrate deploy` ignores it; `npm run db:reset` clears it, which
+is Mac's call since it wipes local data). Prod puppets
+test1/2/3 now log in as `mac.cooper002+test1/2/3@gmail.com` (their
+made-up Gmail addresses were strangers' inboxes; Mac OK'd the one-off
+UPDATE). Any new test account in prod: a `+` address of Mac's Gmail or
+`@test.local`, never an invented address on a real provider.

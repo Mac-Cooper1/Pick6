@@ -5,6 +5,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
+import { ResetPassword } from './pages/ResetPassword';
 import { Dashboard } from './pages/Dashboard';
 import { LeagueSetup } from './pages/LeagueSetup';
 import { MainApp } from './pages/MainApp';
@@ -28,6 +29,8 @@ function App() {
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
+            {/* Emailed reset links land here (token in the #fragment) */}
+            <Route path="/reset-password" element={<ResetPassword />} />
             {/* Dashboard - My Leagues */}
             <Route
               path="/dashboard"

@@ -37,7 +37,7 @@ Smaller spreads and pick'ems score as regular results.
 
 ## Features
 
-- **Accounts**: email + password (bcrypt), JWT sessions; leagues joined by a 6-character code or a shared join link that presets it; members edit their display name in Settings
+- **Accounts**: email + password (bcrypt), JWT sessions; leagues joined by a 6-character code or a shared join link that presets it; members edit their display name in Settings; **forgot password by email**: a 1-hour, single-use link from `Pick 6 <noreply@pick6cfb.com>` (Resend) to `/reset-password`, which signs you in; emails match in any case
 - **Live snake draft**: Socket.IO rooms, server-time countdown clock, scheduled auto-start with a pre-draft lobby (order, presence, queue building), slot-aware pick validation, draft queue with AP-rank autopick fallback
 - **Draft order**: assigned when the draft is scheduled — random or set manually by the commissioner in Settings — and visible in the lobby before the first pick
 - **My Team**: your five teams with this week's game each — opponent, kickoff, venue, TV network (from ESPN), and the stored spread with what it means for scoring
@@ -48,7 +48,7 @@ Smaller spreads and pick'ems score as regular results.
 - **Automated scoring**: ESPN scores + The Odds API spreads → upset detection (±3.5 rule) → weekly rescore, on a GitHub Actions schedule
 - **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-6 swap can never rewrite history
 - **Matchup board**: each rostered team's upcoming opponent, kickoff, and spread (read from the DB — the exact line scoring will use) with AP rank badges
-- **Commissioner tools**: schedule the draft, "Sync now", manual game-result override, member password reset
+- **Commissioner tools**: schedule the draft, "Sync now", manual game-result override, member password reset (a fallback now that members can reset by email)
 - **DB-enforced integrity**: partial unique indexes guarantee one owner per team and one team per slot
 
 ## Tech Stack
@@ -104,6 +104,8 @@ npm --prefix server run lint && npm --prefix client run lint
 | `ADMIN_SECRET` | prod | shared secret for scheduled syncs (`openssl rand -hex 24`) |
 | `ODDS_API_KEY` | recommended | [the-odds-api.com](https://the-odds-api.com/) — without it, no upset detection |
 | `CORS_ORIGIN` | prod | exact client origin |
+| `RESEND_API_KEY` | prod | [resend.com](https://resend.com/) key with Sending access for `pick6cfb.com`. Unset on a dev machine: emails print to the server log instead, reset links included. Unset in production: an error is logged and nothing is sent (the link never reaches Render's logs) |
+| `EMAIL_FROM` / `APP_URL` | no | defaults `Pick 6 <noreply@pick6cfb.com>` / `https://pick6cfb.com` in production (`http://localhost:3000` otherwise). `APP_URL` is the base for the reset link, never the request's Host header |
 | `PORT` / `NODE_ENV` / `ESPN_GROUP_ID` | no | defaults `3001` / `development` / `80` (FBS) |
 
 **Client**: none required — the app is same-origin in dev (Vite proxy) and in production (the server serves the built client). `VITE_API_URL` exists only as an override for split client/API deployments.
@@ -129,7 +131,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 
 | Area | Routes |
 |---|---|
-| Auth | public: `POST /api/auth/register` `POST /api/auth/login` · JWT: `GET /api/auth/me` `PATCH /api/auth/me` (name) |
+| Auth | public: `POST /api/auth/register` `POST /api/auth/login` `POST /api/auth/forgot-password` (same reply whether or not the email has an account; 1 email/min and 5/day per account, 40/day overall) `POST /api/auth/reset-password` (token + new password → signed in) · JWT: `GET /api/auth/me` `PATCH /api/auth/me` (name) |
 | Leagues | `GET /my` · `POST /create` · `POST /join` (code only) · `GET /:id` · `GET /:id/members` · `PATCH /:id/settings` |
 | Week-6 swap | `GET /leagues/:id/swap` (phase, lock time, order with tiebreak SOS, your list, results) · `GET /leagues/:id/swap/teams` (unowned teams by Pick 6 points + your five) · `PUT /leagues/:id/swap/claims` (replace your ranked list while lists are open) — the run itself happens in the scheduled sync |
 | Draft | `GET /:id/picks` · `GET /:id/available` · `GET /:id/state` · `POST /:id/start` (commissioner) · queue CRUD — live picks go over Socket.IO |
@@ -143,11 +145,12 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 ```
 pick6/
 ├── client/src/            # React app (pages, components, contexts, services)
-│   └── pages/             # Landing (/), Login (/login), Dashboard, LeagueSetup, MainApp (tabs)
+│   └── pages/             # Landing (/), Login (/login), ResetPassword, Dashboard, LeagueSetup, MainApp (tabs)
 ├── server/src/
 │   ├── controllers/       # auth, leagues, draft, rosters, standings, admin
 │   ├── services/          # draft, roster, sync (ESPN+odds pipeline), season calendar,
-│   │                      # week-6 swap, matchups, team card, teamMatcher, cache
+│   │                      # week-6 swap, matchups, team card, teamMatcher, cache,
+│   │                      # auth (lookups + password reset), email (Resend)
 │   ├── socket/            # live draft room
 │   ├── middleware/        # JWT auth, admin gate, error handler
 │   └── lib/, utils/, types/
@@ -181,6 +184,15 @@ Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome 
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Oct 4, 2026** — Forgot password by email (Mac: "simple and secure", one thing at a time; the swap emails built alongside it on Oct 2 were pulled before shipping, design kept in NOTES.md):
+- **Forgot password?** on `/login` now asks for your email instead of "Email the dev". The reply is the same whether or not the address has an account, and it's sent before any work happens, so timing doesn't tell either. Limits: 1 email a minute and 5 a day per account, 40 a day overall (in memory), so nobody can flood an inbox or Resend's free 100 a day.
+- **The link** (`/reset-password#token=...`) works for 1 hour and only once, then signs you in. The token is a JWT signed with `JWT_SECRET` plus the account's current password hash, so setting a password kills that link and every other outstanding one, with nothing stored (no migration). It rides in the URL fragment, which browsers never send to a server, so it stays out of logs. A reset token can't be used as a login token or the other way round. Expired or used links show "Link expired" with a one-tap "Send me a new link".
+- **Sender**: `Pick 6 <noreply@pick6cfb.com>` (the usual address for account email; any address on the verified domain can send). `emailService` calls Resend's HTTP API directly: no SDK, no new dependency. Without `RESEND_API_KEY` on a dev machine the email, link included, prints to the server log; in production a missing key logs an error and sends nothing, so a live reset link never lands in Render's logs.
+- **Email matching in any case**: login, signup's duplicate check and the reset match `Mac@x.com` to `mac@x.com` (one prod account has capitals in its stored address; no two accounts differ only by case, checked read-only). Exact otherwise: Prisma's `mode: 'insensitive'` compiles to ILIKE, where `%` and `_` are wildcards (`%@gmail.com` matched an account in testing), so the lookup is a parameterized `lower(email) = lower($1)`.
+- The commissioner reset (`POST /api/admin/reset-password`) stays as a fallback.
+- **Prod data (Oct 2, one-off, Mac's explicit OK)**: the three puppet accounts (test1/2/3, in "bigtest") had made-up Gmail addresses that are real strangers' inboxes. They're now `mac.cooper002+test1/2/3@gmail.com` (Gmail delivers plus-addresses to Mac); passwords unchanged, log in with the new addresses. No made-up addresses remain.
+- Verified: smoke test **122/122** (12 new: wildcard-proof lookup, single use, expiry, rate limit, any-case match, login/reset token separation, HTML escaping); every endpoint over HTTP incl. a `%` login with the right password (401); the whole flow in headless Chrome (link → new password → dashboard signed in; same link again → "Link expired"); phone + desktop screenshots of the screens and the email; `tsc` + lint + build on both sides.
 
 **Oct 2, 2026** — Custom domain: **https://pick6cfb.com** is live:
 - Registered at Cloudflare Registrar (at-cost renewals, free WHOIS privacy). DNS at Cloudflare: CNAME `@` and `www` → `pick6-o4qw.onrender.com`, both **DNS only** (grey cloud) so Render issues and renews the certificate. Added under Render → pick6 → Settings → Custom Domains; `www` 301s to the bare domain.
