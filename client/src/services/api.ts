@@ -497,6 +497,15 @@ export interface TeamCardGame {
   venue: string | null;
   broadcast: string | null;
   espnUrl: string | null;
+  live: TeamCardLive | null; // only while the game is in progress
+}
+
+// Where the ball is, from this team's side of the field
+export interface TeamCardLive {
+  possession: 'team' | 'opponent' | null; // null: kickoff, timeout, break
+  ballOn: number | null; // yards from this team's own goal line (0-100)
+  downDistance: string | null; // ESPN's text, e.g. "3rd & 6 at NE 15"
+  redZone: boolean;
 }
 
 export interface TeamHeadline {

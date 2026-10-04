@@ -109,6 +109,7 @@ export const CACHE_TTL = {
   TEAM_SCHEDULE: 900, // team card schedule between games (60s around kickoffs)
   TEAM_NEWS: 900, // 15 minutes for team card headlines
   MATCHUP_PREDICTOR: 600, // 10 minutes for ESPN's pre-game win %
+  LIVE_GAMES: 60, // team card live score + ball spot (one scoreboard per ESPN week)
 } as const;
 
 export default cacheService;

@@ -7,15 +7,16 @@
  * the tapped game, the season (results with each game's Pick 6 points, then
  * the games still to play, byes included: a bye scores 0) and ESPN
  * headlines. Lines are the stored ones scoring uses, and points come from
- * the server (pointsForTeam); nothing is scored here.
+ * the server (pointsForTeam); nothing is scored here. A live game also
+ * shows where the ball is (LiveField), refreshed every minute.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ArrowSquareOut, CaretRight, Newspaper, PlayCircle, X } from '@phosphor-icons/react';
+import { ArrowSquareOut, CaretLeft, CaretRight, Football, Newspaper, PlayCircle, X } from '@phosphor-icons/react';
 import { useAuth } from '../contexts/AuthContext';
-import { teamApi, TeamCardData, TeamCardGame, TeamHeadline } from '../services/api';
+import { teamApi, TeamCardData, TeamCardGame, TeamCardLive, TeamHeadline } from '../services/api';
 import { ErrorMessage } from './ErrorMessage';
 
 export interface TeamCardTarget {
@@ -403,6 +404,81 @@ function MatchupSide({
   );
 }
 
+/**
+ * Where the ball is in a live game, from this team's side: its own end zone
+ * on the left and the opponent's on the right, so this team always attacks
+ * to the right. Ball and direction only, plus ESPN's down-and-distance line;
+ * no play-by-play.
+ */
+function LiveField({
+  live,
+  teamName,
+  opponentName,
+  color,
+}: {
+  live: TeamCardLive;
+  teamName: string;
+  opponentName: string;
+  color: string;
+}) {
+  if (live.ballOn === null) return null;
+  // 120 yards edge to edge: a 10-yard end zone at each end of the 100
+  const left = ((live.ballOn + 10) / 120) * 100;
+  const offense = live.possession === 'team' ? teamName : live.possession === 'opponent' ? opponentName : null;
+  const toward = live.possession === 'team' ? opponentName : live.possession === 'opponent' ? teamName : null;
+  const description = offense
+    ? `${offense} ball${live.downDistance ? `, ${live.downDistance}` : ''}, driving toward the ${toward} end zone`
+    : `Ball on the ${live.ballOn <= 50 ? `${teamName} ${live.ballOn}` : `${opponentName} ${100 - live.ballOn}`}, nobody in possession`;
+  // Center the ball on its spot whichever side the arrow is on
+  const arrowFirst = live.possession === 'opponent';
+
+  return (
+    <div>
+      {offense && (
+        <div className="flex items-baseline justify-between gap-3 mb-1.5 text-sm">
+          <p className="min-w-0">
+            <span className="font-semibold text-gray-900">{offense} ball</span>
+            {live.downDistance && <span className="text-gray-600"> · {live.downDistance}</span>}
+          </p>
+          {live.redZone && <span className="label shrink-0 text-red-600">Red zone</span>}
+        </div>
+      )}
+      <div role="img" aria-label={description} className="relative flex h-12 rounded-lg overflow-hidden">
+        <div className="w-[8.333%] flex items-center justify-center" style={{ backgroundColor: color }}>
+          <span className="rotate-180 [writing-mode:vertical-rl] whitespace-nowrap font-display font-bold text-[10px] uppercase tracking-wider text-white">
+            {teamName}
+          </span>
+        </div>
+        <div className="relative flex-1 bg-green-700">
+          {[10, 20, 30, 40, 50, 60, 70, 80, 90].map((yard) => (
+            <span
+              key={yard}
+              className={`absolute inset-y-0 w-px ${yard === 50 ? 'bg-white/70' : 'bg-white/30'}`}
+              style={{ left: `${yard}%` }}
+            />
+          ))}
+        </div>
+        <div className="w-[8.333%] flex items-center justify-center bg-gray-700">
+          <span className="[writing-mode:vertical-rl] whitespace-nowrap font-display font-bold text-[10px] uppercase tracking-wider text-white">
+            {opponentName}
+          </span>
+        </div>
+        <div
+          className="absolute top-1/2 flex items-center transition-[left] duration-700"
+          style={{ left: `${left}%`, transform: `translate(${arrowFirst ? -30 : -12}px, -50%)` }}
+          aria-hidden
+        >
+          {arrowFirst && <CaretLeft size={18} weight="bold" className="text-white drop-shadow" />}
+          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-white shadow ring-1 ring-black/10">
+            <Football size={16} weight="fill" className="text-amber-800" />
+          </span>
+          {live.possession === 'team' && <CaretRight size={18} weight="bold" className="text-white drop-shadow" />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-baseline gap-3 py-2.5">
@@ -486,6 +562,7 @@ function MatchupPanel({
 
       <div>
         <p className={`label text-center ${live ? 'text-red-600' : ''}`}>
+          {live && <span className="inline-block w-1.5 h-1.5 mr-1.5 mb-px rounded-full bg-red-600 animate-pulse" aria-hidden />}
           Week {game.week} · {status}
         </p>
         <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -515,6 +592,15 @@ function MatchupPanel({
           </p>
         )}
       </div>
+
+      {live && game.live && (
+        <LiveField
+          live={game.live}
+          teamName={team.abbreviation ?? team.name}
+          opponentName={game.opponent.abbreviation ?? game.opponent.name}
+          color={color}
+        />
+      )}
 
       {predictor && (
         <div>
@@ -652,7 +738,9 @@ export function TeamCard({ leagueId, target, onClose }: TeamCardProps) {
     queryFn: () => teamApi.getTeamCard(leagueId, target.teamId, { eventId, userId: target.userId }),
     // A newly tapped game shows at once from the games already loaded
     placeholderData: keepPreviousData,
-    // Live game: keep the score moving (the server caches ESPN for 60s)
+    // Live game: keep the score and the ball moving. Once a minute, like
+    // the server's ESPN cache: ESPN is the card's only source, so it gets
+    // asked gently. Pauses while the browser tab is hidden.
     refetchInterval: (query) =>
       query.state.data?.games.some((g) => g.status === 'in_progress') ? 60000 : false,
   });

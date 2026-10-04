@@ -119,7 +119,8 @@ export interface ParsedGame {
 export async function fetchScoreboard(
   seasonYear: number,
   weekNumber: number,
-  seasonType: number = 2 // 2 = regular season
+  seasonType: number = 2, // 2 = regular season
+  timeoutMs?: number // user-facing callers (the team card's live games)
 ): Promise<ESPNScoreboardResponse> {
   const url = new URL(`${ESPN_BASE_URL}/scoreboard`);
   url.searchParams.set('groups', DEFAULT_GROUP_ID);
@@ -130,7 +131,7 @@ export async function fetchScoreboard(
 
   console.log(`[ESPN] Fetching scoreboard: ${url.toString()}`);
 
-  const response = await fetch(url.toString());
+  const response = await fetch(url.toString(), timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : undefined);
 
   if (!response.ok) {
     throw new Error(`ESPN API error: ${response.status} ${response.statusText}`);
@@ -533,6 +534,60 @@ export async function fetchTeamSchedule(
     clubhouseUrl: team.clubhouse || null,
     games,
   };
+}
+
+/**
+ * A game in progress, from the week scoreboard (the team card's live view):
+ * score, clock and where the ball is. ESPN's situation.yardLine counts from
+ * the HOME team's goal line (0 = home goal line, 100 = away goal line):
+ * checked on live games against possessionText, e.g. home BUF with the ball
+ * at "NE 15" is 85 and home CHI at "CHI 43" is 43. Kickoffs, timeouts and
+ * breaks have no possession.
+ */
+export interface EspnLiveGame {
+  espnEventId: string;
+  statusDetail: string | null; // e.g. "7:24 - 2nd", "Halftime"
+  homeEspnId: string;
+  awayEspnId: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  possessionEspnId: string | null;
+  yardLine: number | null; // 0-100 from the home goal line
+  downDistance: string | null; // ESPN's text, e.g. "3rd & 6 at NE 15"
+  redZone: boolean;
+}
+
+export function parseLiveGames(response: any): EspnLiveGame[] {
+  const live: EspnLiveGame[] = [];
+  for (const event of response?.events ?? []) {
+    const competition = event.competitions?.[0];
+    if ((event.status ?? competition?.status)?.type?.state !== 'in') continue;
+    const competitors: any[] = competition?.competitors ?? [];
+    const home = competitors.find((c) => c.homeAway === 'home');
+    const away = competitors.find((c) => c.homeAway === 'away');
+    if (!home || !away) continue;
+
+    const situation = competition.situation ?? {};
+    const yardLine = situation.yardLine;
+    live.push({
+      espnEventId: String(event.id),
+      statusDetail: (event.status ?? competition.status)?.type?.shortDetail || null,
+      homeEspnId: String(home.team?.id ?? home.id),
+      awayEspnId: String(away.team?.id ?? away.id),
+      homeScore: scheduleScore(home.score),
+      awayScore: scheduleScore(away.score),
+      possessionEspnId: situation.possession ? String(situation.possession) : null,
+      yardLine: typeof yardLine === 'number' && yardLine >= 0 && yardLine <= 100 ? yardLine : null,
+      downDistance: situation.downDistanceText || null,
+      // ESPN flags kickoffs as red zone too; only an offense can be in it
+      redZone: situation.isRedZone === true && Boolean(situation.possession),
+    });
+  }
+  return live;
+}
+
+export async function fetchLiveGames(seasonYear: number, weekNumber: number): Promise<EspnLiveGame[]> {
+  return parseLiveGames(await fetchScoreboard(seasonYear, weekNumber, 2, TEAM_CARD_TIMEOUT_MS));
 }
 
 export interface EspnHeadline {

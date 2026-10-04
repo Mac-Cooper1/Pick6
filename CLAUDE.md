@@ -58,7 +58,13 @@ turn — standing instruction from Mac)**.
   team's next kickoff (max 15 min; 60s around kickoffs and live games),
   simultaneous requests share one call, and an ESPN error serves the last
   good copy and backs off 60s, so an outage leaves a card built from
-  `Game` rows at worst), in-memory
+  `Game` rows at worst; a live game also gets that ESPN week's scoreboard,
+  cached 60s per week for everyone (Mac: never more often, an ESPN ban
+  would end the app's data): score/clock and the ball from one snapshot, via
+  `applyLiveGames`. ESPN's `situation.yardLine` counts from the HOME goal
+  line, the card's `live.ballOn` from the card team's own, so the team
+  always attacks toward 100; kickoffs have no possession and a bogus
+  red-zone flag), in-memory
   `cacheService` (cleanup timer `unref`'d so scripts can exit),
   `authService` (Oct 4: `findUserByEmail` = any case, exact otherwise, for
   login, signup and reset; it's raw `lower(email) = lower($1)` because
@@ -177,7 +183,7 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 122 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 127 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
@@ -185,7 +191,8 @@ swap functions take a `now` so it stays date-independent), the SOS
 tiebreaker (both directions, unranked fallback) and the swap board, double-game
 week attribution, the odds matcher and the team card (ESPN/Game-row merge,
 which game it opens on, the schedule cache timing, the Game-row-only fallback: ESPN has no 2099 season,
-so the card's end-to-end checks run exactly like an ESPN outage), and the
+so the card's end-to-end checks run exactly like an ESPN outage; plus the
+live view from a real game's numbers, both perspectives), and the
 password reset (single use, expiry, rate limit, any-case but
 wildcard-proof lookup, login/reset token separation, HTML escaping; emails
 are captured in memory, nothing sends). It wipes/recreates its own data (league `SMOKE1`,
@@ -410,7 +417,9 @@ were built, then pulled before shipping; the design is parked in NOTES.md
 with the other email ideas. This Mac's local DB still has that unused
 `EmailLog` table and its `_prisma_migrations` row (folder deleted;
 harmless, `migrate deploy` ignores it; `npm run db:reset` clears it, which
-is Mac's call since it wipes local data). Prod puppets
+is Mac's call since it wipes local data). Same day: the team card's **live
+view** (score/clock every minute, a field with the ball and the offense's
+direction; see `teamCardService` above). Prod puppets
 test1/2/3 now log in as `mac.cooper002+test1/2/3@gmail.com` (their
 made-up Gmail addresses were strangers' inboxes; Mac OK'd the one-off
 UPDATE). Any new test account in prod: a `+` address of Mac's Gmail or

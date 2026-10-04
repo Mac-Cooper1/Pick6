@@ -21,8 +21,8 @@ import {
 import { finalizeGames, calculateLeagueScores } from '../src/services/syncService';
 import { assignScoringWeeks, loadScoringWeekMap } from '../src/services/scoringWeekService';
 import { matchGameToOdds, teamNamesAgree } from '../src/services/teamMatcher';
-import { EspnScheduleGame, ParsedGame } from '../src/services/espnClient';
-import { getTeamCard, mergeTeamGames, pickPreviewGame, scheduleTtl } from '../src/services/teamCardService';
+import { EspnScheduleGame, ParsedGame, parseLiveGames } from '../src/services/espnClient';
+import { applyLiveGames, getTeamCard, mergeTeamGames, pickPreviewGame, scheduleTtl } from '../src/services/teamCardService';
 import { ParsedOdds } from '../src/services/oddsClient';
 import { getUserRoster, getAllRosters } from '../src/services/rosterService';
 import {
@@ -1017,6 +1017,80 @@ async function main() {
     'card from the away side: line flips to -7, favorite lost → -1'
   );
   assert((await getTeamCard(league.id, 999999)) === null, 'unknown team → null (404)');
+
+  // Live view: ESPN's week scoreboard on top of a live game. Shapes copied
+  // from a real live scoreboard (Oct 4, NFL: the same feed format as college)
+  const liveScoreboard = {
+    events: [
+      {
+        id: 'live-1', // home team 2 has the ball at the visitors' 8
+        status: { type: { state: 'in', shortDetail: '15:00 - 2nd' } },
+        competitions: [{
+          competitors: [
+            { homeAway: 'home', score: '0', team: { id: '2' } },
+            { homeAway: 'away', score: '7', team: { id: '17' } },
+          ],
+          situation: { down: 1, yardLine: 92, distance: 8, downDistanceText: '1st & Goal at NE 8', isRedZone: true, possession: '2' },
+        }],
+      },
+      {
+        id: 'live-2', // a kickoff: no possession, yet ESPN says red zone
+        status: { type: { state: 'in', shortDetail: '2:08 - 1st' } },
+        competitions: [{
+          competitors: [
+            { homeAway: 'home', score: '3', team: { id: '21' } },
+            { homeAway: 'away', score: '3', team: { id: '14' } },
+          ],
+          situation: { down: -1, yardLine: 65, distance: 0, isRedZone: true },
+        }],
+      },
+      {
+        id: 'done-1',
+        status: { type: { state: 'post', shortDetail: 'Final' } },
+        competitions: [{ competitors: [{ homeAway: 'home', score: '21', team: { id: '5' } }, { homeAway: 'away', score: '9', team: { id: '6' } }] }],
+      },
+    ],
+  };
+  const liveGames = parseLiveGames(liveScoreboard);
+  const kickoff = liveGames.find((g) => g.espnEventId === 'live-2');
+  assert(
+    liveGames.length === 2 &&
+      liveGames[0].homeScore === 0 &&
+      liveGames[0].awayScore === 7 &&
+      kickoff?.possessionEspnId === null &&
+      kickoff.redZone === false,
+    'live: only games in progress; a kickoff has no possession and no red zone'
+  );
+  const asLive = (espnEventId: string) => ({ ...merged[0], espnEventId, status: 'in_progress' as const, live: null });
+  const [homeView, liveNotOnBoard, finalGame] = applyLiveGames(
+    [asLive('live-1'), asLive('live-9'), { ...merged[0], espnEventId: 'done-1' }],
+    liveGames,
+    '2'
+  );
+  assert(
+    homeView.teamScore === 0 &&
+      homeView.opponentScore === 7 &&
+      homeView.statusDetail === '15:00 - 2nd' &&
+      homeView.live?.possession === 'team' &&
+      homeView.live.ballOn === 92 &&
+      homeView.live.redZone &&
+      homeView.live.downDistance === '1st & Goal at NE 8',
+    'live: the home team on offense attacks toward 100 (ball 92 yards out, 8 to go)'
+  );
+  const [awayView] = applyLiveGames([asLive('live-1')], liveGames, '17');
+  assert(
+    awayView.teamScore === 7 && awayView.live?.possession === 'opponent' && awayView.live.ballOn === 8,
+    "live: the visitors' card flips it (opponent ball, 8 yards from their own goal)"
+  );
+  const [kickView] = applyLiveGames([asLive('live-2')], liveGames, '14');
+  assert(
+    kickView.live?.possession === null && kickView.live.ballOn === 35 && !kickView.live.redZone,
+    'live: a kickoff shows the ball with nobody in possession'
+  );
+  assert(
+    liveNotOnBoard.live === null && finalGame.live === null && finalGame.status === merged[0].status,
+    'live: games not live (or missing from the scoreboard) are left alone'
+  );
 
   // ---------- Password reset by email ----------
   console.log('— Password reset');
