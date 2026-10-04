@@ -6,6 +6,9 @@
  * game's Pick 6 points, the rest of the schedule, ESPN headlines and the
  * FPI strength-of-schedule rank.
  *
+ * Live games also get ESPN's scoreboard on top (applyLiveGames): the score
+ * and clock with where the ball is and who has it, all from one snapshot.
+ *
  * Two sources, split on purpose:
  *  - Scoring truth comes from Game rows: the stored line (never the live
  *    Odds API), the upset flag, and Pick 6 points through the one
@@ -23,10 +26,12 @@ import cacheService, { CACHE_TTL } from './cacheService';
 import { SLOT_LABELS } from './draftService';
 import {
   EspnHeadline,
+  EspnLiveGame,
   EspnScheduleGame,
   EspnTeamSchedule,
   espnGameUrl,
   espnLogoUrl,
+  fetchLiveGames,
   fetchMatchupPredictor,
   fetchTeamNews,
   fetchTeamSchedule,
@@ -72,6 +77,15 @@ export interface TeamCardGame {
   venue: string | null;
   broadcast: string | null;
   espnUrl: string | null;
+  live: TeamCardLive | null; // only while the game is in progress
+}
+
+// Where the ball is, from this team's side of the field
+export interface TeamCardLive {
+  possession: 'team' | 'opponent' | null; // null: kickoff, timeout, break
+  ballOn: number | null; // yards from this team's own goal line (0-100)
+  downDistance: string | null; // ESPN's text, e.g. "3rd & 6 at NE 15"
+  redZone: boolean;
 }
 
 export interface TeamCard {
@@ -180,6 +194,7 @@ export function mergeTeamGames(
       venue: espn.venue ?? row?.game.venue ?? null,
       broadcast: espn.broadcast,
       espnUrl: espnGameUrl(espn.espnEventId),
+      live: null,
     };
   });
 
@@ -220,10 +235,44 @@ export function mergeTeamGames(
       venue: game.venue,
       broadcast: null,
       espnUrl: espnGameUrl(eventId),
+      live: null,
     });
   }
 
   return merged.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+}
+
+/**
+ * Put ESPN's scoreboard on top of the team's live games: its score and clock
+ * (so they come from the same moment as the ball, not the team schedule's
+ * separately cached copy) and the ball, turned to this team's side: ESPN
+ * counts yards from the home goal line, the card from this team's own, so
+ * the team always attacks toward 100.
+ */
+export function applyLiveGames(
+  games: TeamCardGame[],
+  liveGames: EspnLiveGame[],
+  teamEspnId: string
+): TeamCardGame[] {
+  const byEvent = new Map(liveGames.map((g) => [g.espnEventId, g]));
+  return games.map((game) => {
+    const live = game.status === 'in_progress' ? byEvent.get(game.espnEventId) : undefined;
+    if (!live) return game;
+    const isHome = live.homeEspnId === teamEspnId;
+    return {
+      ...game,
+      statusDetail: live.statusDetail ?? game.statusDetail,
+      teamScore: (isHome ? live.homeScore : live.awayScore) ?? game.teamScore,
+      opponentScore: (isHome ? live.awayScore : live.homeScore) ?? game.opponentScore,
+      live: {
+        possession:
+          live.possessionEspnId === null ? null : live.possessionEspnId === teamEspnId ? 'team' : 'opponent',
+        ballOn: live.yardLine === null ? null : isHome ? live.yardLine : 100 - live.yardLine,
+        downDistance: live.downDistance,
+        redZone: live.redZone,
+      },
+    };
+  });
 }
 
 /**
@@ -370,7 +419,23 @@ export async function getTeamCard(
       (a, b) => Number(a.toWeek !== null) - Number(b.toWeek !== null) || b.fromWeek - a.fromWeek
     )[0] ?? null;
 
-  const games = mergeTeamGames(teamId, scoringWeeks, schedule?.games ?? [], ownerRow);
+  let games = mergeTeamGames(teamId, scoringWeeks, schedule?.games ?? [], ownerRow);
+
+  // A live game gets ESPN's week scoreboard on top. One cached copy per week
+  // serves every game in it, so ESPN sees one call a minute at most, however
+  // many cards are open (getting cut off by ESPN would end the card's data)
+  const liveWeeks = [...new Set(games.filter((g) => g.status === 'in_progress').map((g) => g.playedWeek))];
+  if (espnId && liveWeeks.length > 0) {
+    const scoreboards = await Promise.all(
+      liveWeeks.map((week) =>
+        cachedEspn(`espn:liveGames:${seasonYear}:${week}`, CACHE_TTL.LIVE_GAMES, () =>
+          fetchLiveGames(seasonYear, week)
+        )
+      )
+    );
+    games = applyLiveGames(games, scoreboards.flatMap((live) => live ?? []), espnId);
+  }
+
   const preview = pickPreviewGame(games, eventId);
 
   // ESPN's Matchup Predictor only exists before kickoff. Usually it's the

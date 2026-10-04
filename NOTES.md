@@ -99,6 +99,12 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
     providers (fixed Oct 2: the puppets are `+` addresses of Mac's Gmail).
   - Later on the same plumbing: a weekly recap after Saturday's games, draft
     reminders (2027), and a per-member opt-out if anyone asks.
+- **Live field extras (Oct 4).** The team card's live field shows only
+  the ball and the offense's direction, on purpose. ESPN's `situation` also
+  has `distance`, so a yellow first-down marker is one more line; its
+  `lastPlay.text` would be a one-line "last play" (Mac said no play log).
+  The My Team tiles could show the same live score with no extra ESPN
+  calls (same cached week scoreboard).
 - **Change password while signed in.** Today `/login` bounces signed-in
   users to the dashboard, so they'd sign out and use Forgot password. A
   Settings card (current + new password) is small.
