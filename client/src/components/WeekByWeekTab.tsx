@@ -206,7 +206,9 @@ export function WeekByWeekTab({ leagueId }: WeekByWeekTabProps) {
                         )}
                         <div className="flex items-start justify-between gap-1 mt-1">
                           <span className="text-gray-500 break-words leading-tight min-w-0">
-                            {team.opponent ? `vs ${team.opponent}` : 'no game'}
+                            {team.opponent
+                              ? `${team.isHome || team.neutralSite ? 'vs' : 'at'} ${team.opponent}`
+                              : 'no game'}
                             {team.teamSpread !== null && (
                               <span className="ml-1 text-gray-400 whitespace-nowrap">
                                 ({team.teamSpread > 0 ? '+' : ''}{team.teamSpread})

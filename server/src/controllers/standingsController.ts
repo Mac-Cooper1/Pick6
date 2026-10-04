@@ -19,6 +19,9 @@ interface WeekDetailTeam {
   fromWeek: number; // > 1 = added in the week-6 swap
   espnEventId: string | null; // null on a bye (the team card opens on this game)
   opponent: string | null;
+  // "at" only for a road game; home and neutral-site games are "vs"
+  isHome: boolean;
+  neutralSite: boolean;
   result: 'W' | 'L' | 'pending' | 'none';
   scoreLine: string | null;
   points: number;
@@ -151,6 +154,8 @@ export async function getWeekDetail(req: AuthRequest, res: Response) {
             ...base,
             espnEventId: null,
             opponent: null,
+            isHome: false,
+            neutralSite: false,
             result: 'none' as const,
             scoreLine: null,
             points: 0,
@@ -186,6 +191,8 @@ export async function getWeekDetail(req: AuthRequest, res: Response) {
           ...base,
           espnEventId: game.espnEventId,
           opponent,
+          isHome,
+          neutralSite: game.neutralSite,
           result,
           scoreLine,
           points,

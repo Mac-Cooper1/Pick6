@@ -118,6 +118,7 @@ export async function syncWeekGames(
           startTime: espnGame.startTime,
           weekNumber,
           venue: espnGame.venue,
+          neutralSite: espnGame.neutralSite,
         },
         create: {
           espnEventId: espnGame.espnEventId,
@@ -131,6 +132,7 @@ export async function syncWeekGames(
           awayScore: espnGame.awayScore,
           winnerTeamId,
           venue: espnGame.venue,
+          neutralSite: espnGame.neutralSite,
         },
       });
 
@@ -215,6 +217,7 @@ export async function syncOdds(
       homeScore: null,
       awayScore: null,
       venue: game.venue,
+      neutralSite: game.neutralSite,
       broadcast: null,
       isCompleted: false,
       winnerId: null,

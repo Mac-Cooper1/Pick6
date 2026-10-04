@@ -258,7 +258,7 @@ export function MyTeamTab({ leagueId }: MyTeamTabProps) {
                     {game ? (
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
                         <p className="text-gray-800 font-medium">
-                          {game.isHomeTeam ? 'vs.' : 'at'}{' '}
+                          {game.isHomeTeam || game.neutralSite ? 'vs.' : 'at'}{' '}
                           {oppRank && <span className="font-display font-bold text-amber-700">#{oppRank} </span>}
                           {game.opponent}
                         </p>

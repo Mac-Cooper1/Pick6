@@ -183,7 +183,7 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 127 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 129 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
@@ -271,7 +271,10 @@ connects. Tabs are component state, not routes — click the button by label.
   (returns D3 schools); conference membership needs the core API. There is
   no "Week 0" — ESPN's Week 1 spans the late-Aug openers through Labor Day.
   Never compute week boundaries; read `SeasonWeek`. Scoreboard `limit=300`
-  (Week 1 2026 has 104 games; the old 100 truncated). Team schedule
+  (Week 1 2026 has 104 games; the old 100 truncated); its
+  `competitions[0].neutralSite` marks neutral sites (16 in 2026), stored as
+  `Game.neutralSite` since Oct 4 so every "vs"/"at" label says "at" only
+  for a true road game. Team schedule
   (`/teams/{id}/schedule?season=&seasontype=2`): its `team` block always
   describes ESPN's *current* season whatever season you ask for (trust its
   record only when `seasonSummary` matches), scores are `{value,
@@ -419,7 +422,9 @@ with the other email ideas. This Mac's local DB still has that unused
 harmless, `migrate deploy` ignores it; `npm run db:reset` clears it, which
 is Mac's call since it wipes local data). Same day: the team card's **live
 view** (score/clock every minute, a field with the ball and the offense's
-direction; see `teamCardService` above). Prod puppets
+direction; see `teamCardService` above). Evening: "at" for road games on
+Week by Week and League ("@" before), neutral sites "vs" both ways via the
+new `Game.neutralSite` (migration backfilled 2026's known neutral games). Prod puppets
 test1/2/3 now log in as `mac.cooper002+test1/2/3@gmail.com` (their
 made-up Gmail addresses were strangers' inboxes; Mac OK'd the one-off
 UPDATE). Any new test account in prod: a `+` address of Mac's Gmail or

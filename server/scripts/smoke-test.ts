@@ -21,7 +21,7 @@ import {
 import { finalizeGames, calculateLeagueScores } from '../src/services/syncService';
 import { assignScoringWeeks, loadScoringWeekMap } from '../src/services/scoringWeekService';
 import { matchGameToOdds, teamNamesAgree } from '../src/services/teamMatcher';
-import { EspnScheduleGame, ParsedGame, parseLiveGames } from '../src/services/espnClient';
+import { EspnScheduleGame, ParsedGame, parseLiveGames, parseScoreboardGames } from '../src/services/espnClient';
 import { applyLiveGames, getTeamCard, mergeTeamGames, pickPreviewGame, scheduleTtl } from '../src/services/teamCardService';
 import { ParsedOdds } from '../src/services/oddsClient';
 import { getUserRoster, getAllRosters } from '../src/services/rosterService';
@@ -823,6 +823,7 @@ async function main() {
       homeScore: 27,
       awayScore: 24,
       winnerTeamId: aliceSec.teamId,
+      neutralSite: true, // the team card's Game-row fallback must carry it
     },
   });
   const w1Rolled = await calculateLeagueScores(league.id, 1);
@@ -858,6 +859,38 @@ async function main() {
     'Alice week 2 back to 0 (her week-2 game is not final)'
   );
 
+  // ---------- ESPN scoreboard: neutral sites ----------
+  // Red River (Oct 10, 2026) as ESPN lists it: OU "home", TEX "away", in Dallas
+  const sbTeam = (id: string, name: string, abbreviation: string) => ({
+    id, location: name, name, abbreviation, displayName: name, shortDisplayName: name,
+  });
+  const sbEvent = (id: string, neutralSite: boolean | undefined) => ({
+    id,
+    date: '2026-10-10T16:00Z',
+    name: '',
+    shortName: '',
+    status: { type: { id: '1', name: 'STATUS_SCHEDULED', state: 'pre' as const, completed: false, description: '' } },
+    competitions: [{
+      id,
+      date: '2026-10-10T16:00Z',
+      ...(neutralSite === undefined ? {} : { neutralSite }),
+      competitors: [
+        { id: '201', homeAway: 'home' as const, team: sbTeam('201', 'Oklahoma', 'OU') },
+        { id: '251', homeAway: 'away' as const, team: sbTeam('251', 'Texas', 'TEX') },
+      ],
+      status: { type: { state: 'pre' as const, completed: false } },
+    }],
+  });
+  const [redRiver, campusGame] = parseScoreboardGames(
+    { events: [sbEvent('rr', true), sbEvent('campus', undefined)] },
+    2026,
+    6
+  );
+  assert(
+    redRiver.neutralSite === true && campusGame.neutralSite === false,
+    'scoreboard: ESPN neutralSite is read (Red River), and a missing flag means a campus game'
+  );
+
   // ---------- Odds matcher (the Hawai'i vs UNLV cross-match) ----------
   console.log('— Odds matcher');
   const espnGame = (home: string, away: string, startTime: string): ParsedGame => ({
@@ -871,6 +904,7 @@ async function main() {
     homeScore: null,
     awayScore: null,
     venue: null,
+    neutralSite: false,
     broadcast: null,
     isCompleted: false,
     winnerId: null,
@@ -974,6 +1008,7 @@ async function main() {
     'card: a final Game row beats ESPN on score and result (matches the points)'
   );
   assert(cg7.points === 1 && cg7.week === 1, 'card: a synced game missing from ESPN still shows, scored');
+  assert(cg7.neutralSite && !cg1.neutralSite, "card: a Game row's neutral site carries over (\"vs\", never \"at\")");
   assert(cg8.result === 'W' && cg8.points === null, 'card: ESPN final before the sync → no points yet');
   assert(
     cgFuture.week === 9 && cgFuture.points === null && cgFuture.espnUrl?.endsWith('/gameId/401999999') === true,

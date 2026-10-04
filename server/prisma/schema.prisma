@@ -300,9 +300,10 @@ model Game {
   oddsTimestamp  DateTime?
   wasUpset       Boolean   @default(false)
 
-  venue     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  venue       String?
+  neutralSite Boolean  @default(false) // ESPN's flag: "vs" for both teams, never "at"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   homeTeam     Team  @relation("HomeTeam", fields: [homeTeamId], references: [id])
   awayTeam     Team  @relation("AwayTeam", fields: [awayTeamId], references: [id])

@@ -154,7 +154,8 @@ export function LeagueTab({ leagueId }: LeagueTabProps) {
                     // they fail) say that, not "No Game", which reads as a bye
                     let opponentDisplay = 'No Game';
                     if (game) {
-                      opponentDisplay = `${game.isHomeTeam ? 'vs.' : '@'} ${game.opponentAbbreviation || game.opponent}`;
+                      // "at" only for a road game (neutral sites are "vs" for both)
+                      opponentDisplay = `${game.isHomeTeam || game.neutralSite ? 'vs.' : 'at'} ${game.opponentAbbreviation || game.opponent}`;
                     } else if (!matchup && matchupsPending) {
                       opponentDisplay = 'Loading...';
                     } else if (!matchup && matchupsFailed) {
