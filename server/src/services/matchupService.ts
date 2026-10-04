@@ -54,6 +54,7 @@ export interface TeamMatchup {
     opponentAbbreviation: string;
     startTime: Date;
     isHomeTeam: boolean;
+    neutralSite: boolean; // "vs" for both teams, never "at"
     status: string;
     homeScore: number | null;
     awayScore: number | null;
@@ -436,6 +437,7 @@ export async function getRosterMatchups(
         opponentAbbreviation: opponent.abbreviation,
         startTime: game.startTime,
         isHomeTeam: isHome,
+        neutralSite: game.neutralSite,
         status: game.status,
         homeScore: game.homeScore,
         awayScore: game.awayScore,
@@ -476,6 +478,7 @@ export async function getRosterMatchups(
           opponentAbbreviation: opponent.abbreviation || '',
           startTime: rolled.startTime,
           isHomeTeam: isHome,
+          neutralSite: rolled.neutralSite,
           status: gameRowStatus(rolled.status),
           homeScore: rolled.homeScore,
           awayScore: rolled.awayScore,

@@ -213,7 +213,7 @@ export function mergeTeamGames(
       status: gameRowStatus(game.status),
       statusDetail: null,
       isHome,
-      neutralSite: false,
+      neutralSite: game.neutralSite,
       teamRank: null,
       opponent: {
         name: opponent.name,

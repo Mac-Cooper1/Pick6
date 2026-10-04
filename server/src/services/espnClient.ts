@@ -48,6 +48,7 @@ export interface ESPNGame {
   competitions: Array<{
     id: string;
     date: string;
+    neutralSite?: boolean;
     venue?: {
       fullName: string;
       address?: {
@@ -108,6 +109,7 @@ export interface ParsedGame {
   homeScore: number | null;
   awayScore: number | null;
   venue: string | null;
+  neutralSite: boolean; // "vs" for both teams, never "at"
   broadcast: string | null;
   isCompleted: boolean;
   winnerId: string | null;
@@ -279,6 +281,7 @@ export function parseScoreboardGames(
       homeScore: homeCompetitor.score ? parseInt(homeCompetitor.score, 10) : null,
       awayScore: awayCompetitor.score ? parseInt(awayCompetitor.score, 10) : null,
       venue: competition.venue?.fullName || null,
+      neutralSite: competition.neutralSite === true,
       // First listed network ("ESPN", "NBC", "CBSSN", ...); streaming-only
       // games come through the same field (e.g. "ESPN+")
       broadcast: competition.broadcasts?.[0]?.names?.[0] || null,

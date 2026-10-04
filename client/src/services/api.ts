@@ -236,6 +236,9 @@ export interface WeekDetailTeam {
   fromWeek: number; // > 1 = added in the week-6 swap
   espnEventId: string | null; // null on a bye
   opponent: string | null;
+  // "at" only for a road game; home and neutral-site games are "vs"
+  isHome: boolean;
+  neutralSite: boolean;
   result: 'W' | 'L' | 'pending' | 'none';
   scoreLine: string | null;
   points: number;
@@ -433,6 +436,7 @@ export interface TeamMatchup {
     opponentAbbreviation: string;
     startTime: string;
     isHomeTeam: boolean;
+    neutralSite: boolean; // "vs" for both teams, never "at"
     status: string;
     homeScore: number | null;
     awayScore: number | null;
