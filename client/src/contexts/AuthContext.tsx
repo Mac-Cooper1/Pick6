@@ -8,6 +8,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
+  resetPassword: (token: string, password: string) => Promise<void>;
   logout: () => void;
   updateUser: (user: User) => void;
 }
@@ -53,6 +54,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     handleAuthSuccess(response);
   };
 
+  // An emailed reset link signs the user in once the new password is set
+  const resetPassword = async (token: string, password: string) => {
+    const response = await authApi.resetPassword(token, password);
+    handleAuthSuccess(response);
+  };
+
   const logout = () => {
     setUser(null);
     setToken(null);
@@ -72,6 +79,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     isLoading,
     login,
     register,
+    resetPassword,
     logout,
     updateUser,
   };

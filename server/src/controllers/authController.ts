@@ -1,13 +1,21 @@
 import { NextFunction, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import { User } from '@prisma/client';
 import { generateToken } from '../utils/auth';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import prisma from '../lib/prisma';
+import {
+  BCRYPT_ROUNDS,
+  MIN_PASSWORD_LENGTH,
+  findUserByEmail,
+  requestPasswordReset,
+  resetPassword,
+} from '../services/authService';
+import { errorMessage } from '../utils/errors';
 
-const BCRYPT_ROUNDS = 10;
-const MIN_PASSWORD_LENGTH = 8;
 const MAX_NAME_LENGTH = 60;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * Trim + collapse whitespace. The signup form collects first + last but the
@@ -40,8 +48,7 @@ export async function register(req: Request, res: Response, next: NextFunction) 
 
     const normalizedName = normalizeName(name);
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (typeof email !== 'string' || !EMAIL_REGEX.test(email)) {
       throw new AppError('Invalid email format', 400);
     }
 
@@ -49,9 +56,8 @@ export async function register(req: Request, res: Response, next: NextFunction) 
       throw new AppError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`, 400);
     }
 
-    const existing = await prisma.user.findUnique({
-      where: { email },
-    });
+    // Case-insensitive, so "Mac@x.com" can't open a second account beside "mac@x.com"
+    const existing = await findUserByEmail(email);
 
     if (existing) {
       throw new AppError('User with this email already exists', 409);
@@ -67,16 +73,7 @@ export async function register(req: Request, res: Response, next: NextFunction) 
       },
     });
 
-    const token = generateToken(user.id, user.email);
-
-    res.status(201).json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-      },
-      token,
-    });
+    res.status(201).json(authResponse(user));
   } catch (error) {
     next(error);
   }
@@ -91,13 +88,11 @@ export async function login(req: Request, res: Response, next: NextFunction) {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (typeof email !== 'string' || !email || !password) {
       throw new AppError('Email and password are required', 400);
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-    });
+    const user = await findUserByEmail(email);
 
     // Same 401 whether the email is unknown or the password is wrong —
     // don't leak which accounts exist
@@ -108,16 +103,57 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       throw new AppError('Invalid email or password', 401);
     }
 
-    const token = generateToken(user.id, user.email);
+    res.json(authResponse(user));
+  } catch (error) {
+    next(error);
+  }
+}
 
-    res.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-      },
-      token,
-    });
+function authResponse(user: User) {
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+    },
+    token: generateToken(user.id, user.email),
+  };
+}
+
+/**
+ * Email a password reset link
+ * POST /api/auth/forgot-password
+ * Body: { email: string }
+ * Same reply whether or not the address has an account, sent before the
+ * email is built so the response time doesn't tell either.
+ */
+export async function forgotPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { email } = req.body;
+
+    if (typeof email !== 'string' || !EMAIL_REGEX.test(email.trim())) {
+      throw new AppError('Enter the email you signed up with', 400);
+    }
+
+    res.json({ message: 'If that email has a Pick 6 account, a reset link is on its way.' });
+
+    requestPasswordReset(email).catch((error) =>
+      console.error(`[Auth] Reset email failed: ${errorMessage(error)}`)
+    );
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Set a new password from an emailed link, then sign the user in
+ * POST /api/auth/reset-password
+ * Body: { token: string, password: string }
+ */
+export async function resetPasswordWithToken(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = await resetPassword(req.body?.token, req.body?.password);
+    res.json(authResponse(user));
   } catch (error) {
     next(error);
   }

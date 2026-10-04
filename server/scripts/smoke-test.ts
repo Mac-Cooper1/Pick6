@@ -35,6 +35,9 @@ import {
   SWAP_MAX_CLAIMS,
 } from '../src/services/swapService';
 import { getStandings } from '../src/services/standingsService';
+import { captureEmails, renderEmail } from '../src/services/emailService';
+import { findUserByEmail, requestPasswordReset, resetPassword } from '../src/services/authService';
+import { generatePasswordResetToken, generateToken, verifyToken } from '../src/utils/auth';
 
 // The smoke league lives in its own season so its synthetic games can never
 // collide with real Game rows synced into the local DB (a real still-
@@ -79,6 +82,9 @@ async function expectThrow(
 
 async function main() {
   console.log('\n🏈 Pick 6 smoke test\n');
+
+  // Every email lands here instead of going out, even with a Resend key set
+  const outbox = captureEmails();
 
   // ---------- Cleanup from prior runs ----------
   const oldLeague = await prisma.league.findUnique({ where: { joinCode: 'SMOKE1' } });
@@ -1011,6 +1017,72 @@ async function main() {
     'card from the away side: line flips to -7, favorite lost → -1'
   );
   assert((await getTeamCard(league.id, 999999)) === null, 'unknown team → null (404)');
+
+  // ---------- Password reset by email ----------
+  console.log('— Password reset');
+  const escaped = renderEmail({
+    preheader: 'p',
+    heading: 'h',
+    paragraphs: ['<script>x</script> & "q"'],
+    button: { label: 'b', url: 'https://pick6cfb.com/?a=1&b=2' },
+    footer: 'f',
+  });
+  assert(
+    escaped.html.includes('&lt;script&gt;x&lt;/script&gt; &amp; &quot;q&quot;') &&
+      !escaped.html.includes('<script>x'),
+    'reset: names are HTML-escaped in the email'
+  );
+
+  assert(
+    (await findUserByEmail(' SMOKE1@Test.Local '))?.id === alice.id &&
+      (await findUserByEmail('smoke_@test.local')) === null &&
+      (await findUserByEmail('%@test.local')) === null,
+    'email lookup: any case, but % and _ are not wildcards'
+  );
+
+  outbox.length = 0;
+  const t0 = Date.now();
+  await requestPasswordReset('nobody@test.local', t0);
+  await requestPasswordReset('%@test.local', t0);
+  assert(outbox.length === 0, 'reset: an unknown email (or a wildcard) sends nothing');
+  await requestPasswordReset('  SMOKE2@Test.Local ', t0);
+  assert(
+    outbox.length === 1 && outbox[0].to === 'smoke2@test.local',
+    'reset: email matched case-insensitively, sent to the account'
+  );
+  await requestPasswordReset('smoke2@test.local', t0 + 10_000);
+  assert(outbox.length === 1, 'reset: a second request within a minute sends nothing');
+  const resetToken = outbox[0].text.match(/\/reset-password#token=(\S+)/)?.[1] ?? '';
+  assert(resetToken.length > 0, 'reset: the email carries a /reset-password#token= link');
+
+  await expectThrow(
+    () => resetPassword(generateToken(bob.id, bob.email), 'newpass123'),
+    'reset: a login token is not a reset token',
+    'reset link'
+  );
+  let resetTokenLogsIn = true;
+  try {
+    verifyToken(resetToken);
+  } catch {
+    resetTokenLogsIn = false;
+  }
+  assert(!resetTokenLogsIn, 'reset: a reset token is not a login token');
+  await expectThrow(() => resetPassword(resetToken, 'short'), 'reset: under 8 characters rejected', 'at least 8');
+
+  const resetUser = await resetPassword(resetToken, 'newpass123');
+  const bobAfter = await prisma.user.findUnique({ where: { id: bob.id } });
+  assert(
+    resetUser.id === bob.id && (await bcrypt.compare('newpass123', bobAfter!.passwordHash)),
+    'reset: the new password is set'
+  );
+  await expectThrow(() => resetPassword(resetToken, 'another123'), 'reset: a link works only once', 'reset link');
+  await expectThrow(
+    () => resetPassword(generatePasswordResetToken(bob.id, bobAfter!.passwordHash, -1), 'another123'),
+    'reset: an expired link is rejected',
+    'reset link'
+  );
+  // Back to smoke123 so the smoke accounts still sign in
+  await prisma.user.update({ where: { id: bob.id }, data: { passwordHash: smokeHash } });
 
   // ---------- Summary ----------
   console.log(`\n${failed === 0 ? '🎉' : '💥'} ${passed} passed, ${failed} failed`);

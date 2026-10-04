@@ -77,6 +77,37 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## Parking lot
 
+- **Swap emails (built Oct 2, pulled Oct 4 before shipping: Mac wants one
+  thing at a time, reset first).** The design worked end to end in the
+  smoke test, so rebuilding is mostly re-typing:
+  - Reminder: in the 48h before lists lock, to members of unrun leagues
+    with no list and `swapUsed` false ("your week 6 swap list is empty",
+    lock time in ET, button to the swap tab via a `?tab=swap` start-tab
+    param on `/league/:id`). In 2026 the first sync in that window would
+    have been Sat 08:30 UTC.
+  - Result: after a league's run (only within 72h, so a late deploy never
+    mails an old one), each member's outcome (dropped/added, which choice,
+    or why they kept their five; their place in the order) plus every swap
+    in the league.
+  - Both called at the end of `syncCurrentWindow`. Send-once via a new
+    `EmailLog` table (unique `key` like `swap-reminder:league-5:user-12`,
+    claimed with `createMany({ skipDuplicates: true })` so a duplicate isn't
+    a logged Prisma error; a failed send deletes its row so the next sync
+    retries; the key doubles as Resend's `Idempotency-Key`).
+  - Volume: ~28 reminders + ~32 results per season vs Resend's free 100 a
+    day. Prod test accounts must never have invented addresses on real
+    providers (fixed Oct 2: the puppets are `+` addresses of Mac's Gmail).
+  - Later on the same plumbing: a weekly recap after Saturday's games, draft
+    reminders (2027), and a per-member opt-out if anyone asks.
+- **Change password while signed in.** Today `/login` bounces signed-in
+  users to the dashboard, so they'd sign out and use Forgot password. A
+  Settings card (current + new password) is small.
+- **Sessions survive a password reset.** Login JWTs last 7 days and aren't
+  tied to the password, so resetting doesn't sign out other devices. Fine
+  for a friends league; if it ever matters, put a password-hash-derived
+  claim (or a token version column) in the login JWT. Same bucket: a
+  "your password was changed" email after a reset.
+
 - **Client major upgrades the audit still lists (2027 offseason, or a quiet
   week).** After Sep 30's fixes `npm audit` shows 4 in `client/` (vite,
   esbuild, react-router, react-router-dom), all needing a major version.

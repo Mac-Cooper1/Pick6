@@ -38,6 +38,9 @@ services:
         value: production
       - key: ODDS_API_KEY
         sync: false # paste your key in the dashboard
+      - key: RESEND_API_KEY
+        sync: false # Resend → API Keys, Sending access for pick6cfb.com; paste in the dashboard
+      # EMAIL_FROM / APP_URL default to Pick 6 <noreply@pick6cfb.com> / https://pick6cfb.com
       # CORS_ORIGIN intentionally unset — client and API share one origin
 
 databases:
