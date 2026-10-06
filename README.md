@@ -2,7 +2,7 @@
 
 Draft **5 college football teams — one per conference slot — and ride their wins all season.** Live snake draft with your league, automated scoring from real games and betting lines, one cumulative leaderboard. Built for the 2026 season.
 
-**Play:** https://pick6-o4qw.onrender.com (the official Pick 6; any league can sign up there)
+**Play:** https://pick6cfb.com (the official Pick 6; any league can sign up there)
 
 ## Game Rules
 
@@ -167,7 +167,7 @@ pick6/
 
 ## License
 
-Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome to read the code, change it, share it and run it privately, and pull requests are welcome; hosting a copy for other people, packaging it as an app, or using it commercially isn't allowed. Want your own league? Create one on [Pick 6](https://pick6-o4qw.onrender.com). Third-party packages, fonts and data (ESPN, The Odds API) keep their own terms.
+Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome to read the code, change it, share it and run it privately, and pull requests are welcome; hosting a copy for other people, packaging it as an app, or using it commercially isn't allowed. Want your own league? Create one on [Pick 6](https://pick6cfb.com). Third-party packages, fonts and data (ESPN, The Odds API) keep their own terms.
 
 ## Changelog
 
