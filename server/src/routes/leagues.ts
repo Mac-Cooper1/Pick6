@@ -12,6 +12,11 @@ import {
   getSwapTeamsEndpoint,
   saveSwapClaimsEndpoint,
 } from '../controllers/swapController';
+import {
+  createVideoEndpoint,
+  listVideosEndpoint,
+  sendVideoEndpoint,
+} from '../controllers/videoController';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../utils/asyncHandler';
 
@@ -31,5 +36,10 @@ router.patch('/:leagueId/settings', authenticate, asyncHandler(updateLeagueSetti
 router.get('/:leagueId/swap', authenticate, asyncHandler(getSwapStateEndpoint));
 router.get('/:leagueId/swap/teams', authenticate, asyncHandler(getSwapTeamsEndpoint));
 router.put('/:leagueId/swap/claims', authenticate, asyncHandler(saveSwapClaimsEndpoint));
+
+// Commissioner video messages (prototype: VIDEO_CREATORS allowlist, fal.ai)
+router.get('/:leagueId/videos', authenticate, asyncHandler(listVideosEndpoint));
+router.post('/:leagueId/videos', authenticate, asyncHandler(createVideoEndpoint));
+router.post('/:leagueId/videos/:videoId/send', authenticate, asyncHandler(sendVideoEndpoint));
 
 export default router;

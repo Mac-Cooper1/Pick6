@@ -37,6 +37,8 @@ import {
 import { getStandings } from '../src/services/standingsService';
 import { captureEmails, renderEmail } from '../src/services/emailService';
 import { findUserByEmail, requestPasswordReset, resetPassword } from '../src/services/authService';
+import { createVideo, failInterruptedVideos, listVideos, processVideo, sendVideo, VIDEOS_PER_DAY } from '../src/services/videoService';
+import { RunModel } from '../src/services/falClient';
 import { generatePasswordResetToken, generateToken, verifyToken } from '../src/utils/auth';
 
 // The smoke league lives in its own season so its synthetic games can never
@@ -1126,6 +1128,104 @@ async function main() {
     liveNotOnBoard.live === null && finalGame.live === null && finalGame.status === merged[0].status,
     'live: games not live (or missing from the scoreboard) are left alone'
   );
+
+  // ---------- Commissioner video messages (fal stubbed: free, offline) ----------
+  console.log('— Video messages');
+  const savedFal = { key: process.env.FAL_KEY, creators: process.env.VIDEO_CREATORS };
+  process.env.FAL_KEY = 'smoke-test-key';
+  process.env.VIDEO_CREATORS = 'someone-else@test.local';
+  const photo = 'data:image/jpeg;base64,' + Buffer.from('not really a jpeg').toString('base64');
+  const newVideo = (extra: Record<string, unknown> = {}) => ({
+    photo, setting: 'press', voice: 'Brian', script: 'Week six is here. Set your swap lists, cowards.', consent: true, ...extra,
+  });
+  assert(!(await listVideos(league.id, alice.id)).canCreate, 'video: a commissioner not on VIDEO_CREATORS cannot make one');
+  process.env.VIDEO_CREATORS = ' Smoke1@Test.Local , other@test.local';
+  assert(
+    (await listVideos(league.id, alice.id)).canCreate && !(await listVideos(league.id, bob.id)).canCreate,
+    'video: an allowlisted commissioner can (any case), a member cannot'
+  );
+  await expectThrow(() => createVideo(league.id, bob.id, newVideo(), { start: false }), 'video: a member cannot start one', 'invite-only');
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo({ consent: false }), { start: false }), 'video: own-face consent required', 'photo is of you');
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo({ photo: 'https://example.com/me.jpg' }), { start: false }), 'video: photo must be an uploaded image', 'Add a photo');
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo({ setting: 'moon' }), { start: false }), 'video: unknown setting rejected', 'Pick a setting');
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo({ voice: 'Morgan Freeman' }), { start: false }), 'video: unknown voice rejected', 'Pick a voice');
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo({ script: 'x'.repeat(601) }), { start: false }), 'video: script capped at 600 characters', 'under 600');
+
+  // A stub fal: records each call, answers like the real models
+  const falCalls: { modelId: string; input: Record<string, unknown>; keepForever?: boolean }[] = [];
+  const stubFal = (failOn?: string, noUrl = false): RunModel => async (modelId, input, options) => {
+    falCalls.push({ modelId, input, keepForever: options?.keepForever });
+    if (failOn && modelId.includes(failOn)) throw new Error('fal 422: no face found');
+    if (modelId.includes('nano-banana')) return { images: [{ url: 'https://fal.media/scene.jpg' }] };
+    if (modelId.includes('elevenlabs')) return { audio: { url: 'https://fal.media/voice.mp3' } };
+    return noUrl ? { video: {} } : { video: { url: 'https://fal.media/final.mp4' }, duration: 12.5 };
+  };
+  const readyVideo = await createVideo(league.id, alice.id, newVideo(), { start: false });
+  assert(readyVideo.status === 'PROCESSING' && readyVideo.mine, 'video: starts PROCESSING');
+  await processVideo(readyVideo.id, { photo, setting: 'press', voice: 'Brian', script: readyVideo.script }, stubFal());
+  const readyRow = await prisma.leagueVideo.findUnique({ where: { id: readyVideo.id } });
+  assert(
+    readyRow?.status === 'READY' && readyRow.videoUrl === 'https://fal.media/final.mp4' && readyRow.durationSec === 12.5,
+    'video: three fal jobs end READY with the video URL and length'
+  );
+  const [sceneCall, voiceCall, videoCall] = falCalls;
+  assert(
+    falCalls.length === 3 &&
+      (sceneCall.input.image_urls as string[])[0] === photo &&
+      voiceCall.input.voice === 'Brian' && voiceCall.input.text === readyVideo.script &&
+      videoCall.input.image_url === 'https://fal.media/scene.jpg' && videoCall.input.audio_url === 'https://fal.media/voice.mp3' &&
+      videoCall.keepForever === true && !sceneCall.keepForever && !voiceCall.keepForever,
+    'video: photo → setting → voice → animation, and only the finished video is kept for good'
+  );
+  falCalls.length = 0;
+  const asIs = await createVideo(league.id, alice.id, newVideo({ setting: 'asis' }), { start: false });
+  await processVideo(asIs.id, { photo, setting: 'asis', voice: 'Bill', script: asIs.script }, stubFal());
+  assert(falCalls.length === 2 && falCalls[1].input.image_url === photo, '"My photo as is" skips the setting job');
+  const failedVideo = await createVideo(league.id, alice.id, newVideo(), { start: false });
+  await processVideo(failedVideo.id, { photo, setting: 'press', voice: 'Brian', script: failedVideo.script }, stubFal('kling'));
+  const noUrl = await createVideo(league.id, alice.id, newVideo(), { start: false });
+  await processVideo(noUrl.id, { photo, setting: 'press', voice: 'Brian', script: noUrl.script }, stubFal(undefined, true));
+  const [failedRow, noUrlRow] = await Promise.all([
+    prisma.leagueVideo.findUnique({ where: { id: failedVideo.id } }),
+    prisma.leagueVideo.findUnique({ where: { id: noUrl.id } }),
+  ]);
+  assert(
+    failedRow?.status === 'FAILED' && !!failedRow.error?.includes('front-facing photo') &&
+      noUrlRow?.status === 'FAILED' && noUrlRow.videoUrl === null,
+    'video: a fal error or a result without a URL ends FAILED with a plain reason'
+  );
+
+  const bobVideosBefore = await listVideos(league.id, bob.id);
+  const aliceList = await listVideos(league.id, alice.id);
+  assert(bobVideosBefore.videos.length === 0 && aliceList.videos.length === 4, "video: unsent videos are only their maker's");
+  await expectThrow(() => sendVideo(league.id, readyVideo.id, bob.id), 'video: a member cannot send', 'Only the commissioner');
+  await expectThrow(() => sendVideo(league.id, failedVideo.id, alice.id), 'video: a failed video cannot be sent', 'not ready');
+  outbox.length = 0;
+  const sent = await sendVideo(league.id, readyVideo.id, alice.id);
+  assert(
+    sent.sentTo === 2 &&
+      outbox.map((e) => e.to).sort().join() === 'smoke2@test.local,smoke3@test.local' &&
+      outbox[0].text.includes(`/league/${league.id}?video=${readyVideo.id}`) &&
+      outbox[0].text.includes('AI-generated'),
+    'video: one tap emails every other member a link, labeled AI-generated'
+  );
+  await expectThrow(() => sendVideo(league.id, readyVideo.id, alice.id), 'video: sends once', 'Already sent');
+  const bobVideosAfter = await listVideos(league.id, bob.id);
+  assert(
+    bobVideosAfter.videos.length === 1 && bobVideosAfter.videos[0].videoUrl === 'https://fal.media/final.mp4' && !bobVideosAfter.videos[0].mine,
+    'video: once sent, every member sees it'
+  );
+
+  const interrupted = await createVideo(league.id, alice.id, newVideo(), { start: false });
+  await failInterruptedVideos();
+  const interruptedRow = await prisma.leagueVideo.findUnique({ where: { id: interrupted.id } });
+  assert(interruptedRow?.status === 'FAILED' && !!interruptedRow.error?.includes('Interrupted'), 'video: a restart fails videos left mid-way');
+  assert(VIDEOS_PER_DAY === 5, 'video: 5 a day per maker');
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo(), { start: false }), 'video: the 6th in a day is refused', 'Try again tomorrow');
+  process.env.FAL_KEY = savedFal.key;
+  process.env.VIDEO_CREATORS = savedFal.creators;
+  if (savedFal.key === undefined) delete process.env.FAL_KEY;
+  if (savedFal.creators === undefined) delete process.env.VIDEO_CREATORS;
 
   // ---------- Password reset by email ----------
   console.log('— Password reset');

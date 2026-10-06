@@ -2,7 +2,7 @@
 
 Draft **5 college football teams — one per conference slot — and ride their wins all season.** Live snake draft with your league, automated scoring from real games and betting lines, one cumulative leaderboard. Built for the 2026 season.
 
-**Play:** https://pick6-o4qw.onrender.com (the official Pick 6; any league can sign up there)
+**Play:** https://pick6cfb.com (the official Pick 6; any league can sign up there)
 
 ## Game Rules
 
@@ -49,6 +49,7 @@ Smaller spreads and pick'ems score as regular results.
 - **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-6 swap can never rewrite history
 - **Matchup board**: each rostered team's upcoming opponent, kickoff, and spread (read from the DB — the exact line scoring will use) with AP rank badges
 - **Commissioner tools**: schedule the draft, "Sync now", manual game-result override, member password reset (a fallback now that members can reset by email)
+- **Commissioner video messages (prototype)**: in Settings, a commissioner turns their own photo, a setting (press conference, locker room, sideline, tailgate, TV studio, or as is), a voice and a script into an AI talking video (fal.ai: nano-banana edit, ElevenLabs, Kling AI Avatar v2; about $1.75 per 30 seconds, pay per use), then emails it to the whole league in one tap; a banner on the league page plays it for everyone. Invite-only (`VIDEO_CREATORS`) while it's free; $10 Stripe checkout is the planned next step
 - **DB-enforced integrity**: partial unique indexes guarantee one owner per team and one team per slot
 
 ## Tech Stack
@@ -104,6 +105,8 @@ npm --prefix server run lint && npm --prefix client run lint
 | `ADMIN_SECRET` | prod | shared secret for scheduled syncs (`openssl rand -hex 24`) |
 | `ODDS_API_KEY` | recommended | [the-odds-api.com](https://the-odds-api.com/) — without it, no upset detection |
 | `CORS_ORIGIN` | prod | exact client origin |
+| `FAL_KEY` | for videos | [fal.ai](https://fal.ai/) API key for the commissioner video messages (pay per use). Unset: the video maker stays hidden |
+| `VIDEO_CREATORS` | for videos | comma-separated login emails allowed to make videos (they must also commission the league); every video is paid from the fal account |
 | `RESEND_API_KEY` | prod | [resend.com](https://resend.com/) key with Sending access for `pick6cfb.com`. Unset on a dev machine: emails print to the server log instead, reset links included. Unset in production: an error is logged and nothing is sent (the link never reaches Render's logs) |
 | `EMAIL_FROM` / `APP_URL` | no | defaults `Pick 6 <noreply@pick6cfb.com>` / `https://pick6cfb.com` in production (`http://localhost:3000` otherwise). `APP_URL` is the base for the reset link, never the request's Host header |
 | `PORT` / `NODE_ENV` / `ESPN_GROUP_ID` | no | defaults `3001` / `development` / `80` (FBS) |
@@ -133,6 +136,7 @@ All routes JWT-protected unless noted; admin routes take `x-admin-secret` **or**
 |---|---|
 | Auth | public: `POST /api/auth/register` `POST /api/auth/login` `POST /api/auth/forgot-password` (same reply whether or not the email has an account; 1 email/min and 5/day per account, 40/day overall) `POST /api/auth/reset-password` (token + new password → signed in) · JWT: `GET /api/auth/me` `PATCH /api/auth/me` (name) |
 | Leagues | `GET /my` · `POST /create` · `POST /join` (code only) · `GET /:id` · `GET /:id/members` · `PATCH /:id/settings` |
+| Video messages | `GET /leagues/:id/videos` (sent videos, your drafts, the setting/voice options) · `POST /leagues/:id/videos` (photo as a data URL, setting, voice, script, consent; returns PROCESSING, ready in a few minutes) · `POST /leagues/:id/videos/:videoId/send` (emails every other member, once) |
 | Week-6 swap | `GET /leagues/:id/swap` (phase, lock time, order with tiebreak SOS, your list, results) · `GET /leagues/:id/swap/teams` (unowned teams by Pick 6 points + your five) · `PUT /leagues/:id/swap/claims` (replace your ranked list while lists are open) — the run itself happens in the scheduled sync |
 | Draft | `GET /:id/picks` · `GET /:id/available` · `GET /:id/state` · `POST /:id/start` (commissioner) · queue CRUD — live picks go over Socket.IO |
 | Rosters | `GET /:id` · `GET /:id/my` · `GET /:id/user/:userId` · `GET /:id/available` · `GET /:id/matchups[/all]` · `GET /:id/teams/:teamId[?event=&userId=]` (team card: games with lines and Pick 6 points, schedule, ESPN headlines, SOS) |
@@ -150,7 +154,8 @@ pick6/
 │   ├── controllers/       # auth, leagues, draft, rosters, standings, admin
 │   ├── services/          # draft, roster, sync (ESPN+odds pipeline), season calendar,
 │   │                      # week-6 swap, matchups, team card, teamMatcher, cache,
-│   │                      # auth (lookups + password reset), email (Resend)
+│   │                      # auth (lookups + password reset), email (Resend),
+│   │                      # fal + video (commissioner video messages)
 │   ├── socket/            # live draft room
 │   ├── middleware/        # JWT auth, admin gate, error handler
 │   └── lib/, utils/, types/
@@ -167,7 +172,7 @@ pick6/
 
 ## License
 
-Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome to read the code, change it, share it and run it privately, and pull requests are welcome; hosting a copy for other people, packaging it as an app, or using it commercially isn't allowed. Want your own league? Create one on [Pick 6](https://pick6-o4qw.onrender.com). Third-party packages, fonts and data (ESPN, The Odds API) keep their own terms.
+Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome to read the code, change it, share it and run it privately, and pull requests are welcome; hosting a copy for other people, packaging it as an app, or using it commercially isn't allowed. Want your own league? Create one on [Pick 6](https://pick6cfb.com). Third-party packages, fonts and data (ESPN, The Odds API) keep their own terms.
 
 ## Changelog
 
@@ -184,6 +189,14 @@ Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome 
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Oct 5, 2026** — Commissioner video messages, free prototype (Mac's idea: "more funny than practical, but maybe revenue generating"; his call: prototype free for his league first, $10 Stripe checkout later if it's a hit):
+- **What it does**: Settings → Video message (commissioners on the allowlist). Pick a photo of yourself, a setting (press conference, locker room, sideline, tailgate, TV studio, or the photo as is), one of 8 voices, write up to 600 characters (about 40 seconds), tick "this photo is of me", tap Make my video. A few minutes later it's ready to preview; one tap emails every other member a "Watch it" link (from `noreply@`, labeled AI-generated), and the league page shows a banner that plays it until you've watched it (two weeks max). The email link (`/league/:id?video=ID`) opens the player directly.
+- **How it's made** (`videoService` + `falClient`, all on fal.ai, pay per use, no monthly fee): nano-banana edit puts the photo in the setting, ElevenLabs (multilingual v2) reads the script, Kling AI Avatar v2 Standard ($0.056/second) animates the photo to the voice. About $1.75 for 30 seconds, all from Mac's fal credits. The jobs run in the server process; a restart marks any in flight as failed ("try again").
+- **Storage and privacy**: the photo is never stored by Pick 6 (it goes to fal as part of the request). Only the finished video's URL is kept, on fal's CDN set to never expire (unguessable, public if someone has the link); the in-between files expire after a day. Members only see a video once it's sent; drafts are their maker's.
+- **Guardrails**: `FAL_KEY` set, the maker's login email in `VIDEO_CREATORS`, and they commission that league (so no one else spends Mac's credits); own face only (fal's acceptable-use policy forbids anyone's likeness without consent), confirmed by a checkbox the server requires; 5 videos a day per maker; script 10 to 600 characters; photo shrunk in the browser to 1024px JPEG (the route accepts up to 4 MB, everything else keeps the 100 KB body limit).
+- **New table** `LeagueVideo` (migration `20261005120000_league_videos`, additive). New env vars `FAL_KEY`, `VIDEO_CREATORS` (both in `render.yaml` as dashboard-only).
+- Verified: smoke test **151/151** (22 new, with fal stubbed so it's free and offline: who may make one, every input check, the three jobs and what each hands the next, only the final video kept for good, "as is" skipping the setting job, failures ending in a plain reason, drafts private, sending once to every other member, the restart sweep, the daily cap); every endpoint over HTTP (a member gets "invite-only", a 214 KB photo gets through the body limit, a resend gets "Already sent"); fal's real API answered a call with a fake key ("authentication is required"), so the queue URL and request format are right up to the key; the whole flow in headless Chrome at phone size (maker filled in, banner, player playing, banner gone after watching, the email link opening the player). Not yet verified: a real video, since that needs Mac's fal key (the voice names especially).
 
 **Oct 4, 2026 (evening)** — "at" for road games (Mac: Week by Week said "vs" for every game; "same with League I think"):
 - **Week by Week** tiles said "vs" for every game: the drill-down data had no home/away at all. It now carries `isHome` and `neutralSite`, and a tile reads "at Oklahoma" for a road game, "vs" otherwise.

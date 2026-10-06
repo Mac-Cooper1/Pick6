@@ -341,6 +341,54 @@ export interface SwapTeam {
   losses: number;
 }
 
+// Commissioner video messages (Oct 5 prototype): an AI talking video made
+// from the commissioner's photo, a setting, a voice and their script
+export type LeagueVideoStatus = 'PROCESSING' | 'READY' | 'FAILED';
+
+export interface LeagueVideo {
+  id: number;
+  maker: { userId: number; name: string };
+  mine: boolean;
+  setting: string;
+  settingLabel: string;
+  voice: string;
+  script: string;
+  status: LeagueVideoStatus;
+  error: string | null; // why it failed
+  videoUrl: string | null; // set once READY
+  durationSec: number | null;
+  sentAt: string | null; // emailed to the league
+  createdAt: string;
+}
+
+export interface LeagueVideos {
+  canCreate: boolean; // commissioner on the prototype allowlist
+  settings: { id: string; label: string }[];
+  voices: { id: string; label: string; description: string }[];
+  maxScriptChars: number;
+  videos: LeagueVideo[]; // sent ones, plus your own drafts
+}
+
+export const videoApi = {
+  list: async (leagueId: number): Promise<LeagueVideos> => {
+    const { data } = await api.get<LeagueVideos>(`/leagues/${leagueId}/videos`);
+    return data;
+  },
+
+  create: async (
+    leagueId: number,
+    body: { photo: string; setting: string; voice: string; script: string; consent: boolean }
+  ): Promise<LeagueVideo> => {
+    const { data } = await api.post<LeagueVideo>(`/leagues/${leagueId}/videos`, body);
+    return data;
+  },
+
+  send: async (leagueId: number, videoId: number): Promise<{ sentTo: number }> => {
+    const { data } = await api.post<{ sentTo: number }>(`/leagues/${leagueId}/videos/${videoId}/send`);
+    return data;
+  },
+};
+
 export const swapApi = {
   getState: async (leagueId: number): Promise<SwapState> => {
     const { data } = await api.get<SwapState>(`/leagues/${leagueId}/swap`);

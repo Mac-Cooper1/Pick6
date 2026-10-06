@@ -24,6 +24,7 @@ model User {
   rosterSlots   RosterSlot[]
   draftQueues   DraftQueue[]
   swapClaims    SwapClaim[]
+  leagueVideos  LeagueVideo[]
 }
 
 model League {
@@ -65,6 +66,38 @@ model League {
   rosterSlots  RosterSlot[]
   draftQueues  DraftQueue[]
   swapClaims   SwapClaim[]
+  videos       LeagueVideo[]
+}
+
+// AI video message from a commissioner to their league (Oct 5 prototype):
+// photo + setting + voice + script, made into a talking video on fal.ai.
+// Only the finished video's URL is kept (fal's CDN, set to never expire);
+// the photo itself is never stored.
+model LeagueVideo {
+  id          Int               @id @default(autoincrement())
+  leagueId    Int
+  createdById Int
+  setting     String // a VIDEO_SETTINGS id
+  voice       String // a VIDEO_VOICES id
+  script      String
+  status      LeagueVideoStatus @default(PROCESSING)
+  error       String? // why it failed, shown to its maker
+  videoUrl    String?
+  durationSec Float?
+  sentAt      DateTime? // "Send to the league": the emails went out
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  league    League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  createdBy User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([leagueId, createdAt])
+}
+
+enum LeagueVideoStatus {
+  PROCESSING
+  READY
+  FAILED
 }
 
 enum DraftStatus {

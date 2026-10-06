@@ -105,6 +105,20 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
   `lastPlay.text` would be a one-line "last play" (Mac said no play log).
   The My Team tiles could show the same live score with no extra ESPN
   calls (same cached week scoreboard).
+- **Commissioner videos, after the free prototype (Oct 5).** Next steps
+  if friends love it, in order:
+  - **$10 Stripe Checkout** per video: pay before the fal jobs start,
+    auto-refund if the video fails (fal costs ~$1.75 per 30s, Stripe
+    takes ~$0.59, so ~$7.66 left). Needs Mac's Stripe account, a refund
+    policy and sales-tax settings (Stripe Tax). Then `VIDEO_CREATORS` can go.
+  - **Script moderation before strangers can use it**: today it's
+    invite-only friends, relying on the providers' own filters. An open,
+    paid version needs a check on the script (and maybe the photo).
+  - Voice samples (play each voice before choosing), your own voice
+    (ElevenLabs instant clone, with its own consent step), delete a video,
+    and a member reply ("react") if they turn out to be a hit.
+  - Jobs survive a deploy: store fal's request ids and resume polling
+    instead of marking in-flight videos failed at startup.
 - **Change password while signed in.** Today `/login` bounces signed-in
   users to the dashboard, so they'd sign out and use Forgot password. A
   Settings card (current + new password) is small.

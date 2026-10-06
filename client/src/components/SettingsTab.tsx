@@ -7,6 +7,7 @@ import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { Button } from './Button';
 import { Input } from './Input';
+import { VideoComposer } from './VideoMessages';
 
 interface SettingsTabProps {
   leagueId: number;
@@ -377,6 +378,9 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
           </Button>
         </div>
       )}
+
+      {/* Commissioner: AI video message (prototype allowlist; renders nothing otherwise) */}
+      {isCommissioner && <VideoComposer leagueId={leagueId} />}
 
       {/* Commissioner Settings */}
       {isCommissioner ? (

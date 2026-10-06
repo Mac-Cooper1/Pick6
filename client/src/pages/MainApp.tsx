@@ -10,6 +10,7 @@ import { LeaderboardTab } from '../components/LeaderboardTab';
 import { WeekByWeekTab } from '../components/WeekByWeekTab';
 import { SwapTab } from '../components/SwapTab';
 import { SettingsTab } from '../components/SettingsTab';
+import { LeagueVideoBanner } from '../components/VideoMessages';
 
 type Tab = 'leaderboard' | 'myteam' | 'weeks' | 'league' | 'draft' | 'swap' | 'settings';
 
@@ -66,6 +67,8 @@ export function MainApp() {
 
       {/* Tab Content */}
       <main className="max-w-6xl mx-auto">
+        {/* The commissioner's latest video message, until watched */}
+        <LeagueVideoBanner leagueId={leagueIdNum} />
         {activeTab === 'leaderboard' && <LeaderboardTab leagueId={leagueIdNum} />}
         {activeTab === 'myteam' && <MyTeamTab leagueId={leagueIdNum} />}
         {activeTab === 'weeks' && <WeekByWeekTab leagueId={leagueIdNum} />}
