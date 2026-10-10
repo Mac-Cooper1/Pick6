@@ -341,6 +341,84 @@ export interface SwapTeam {
   losses: number;
 }
 
+// Commissioner video messages (Oct 5 prototype): an AI talking video made
+// from the commissioner's photo, a setting, a voice and their script
+export type LeagueVideoStatus = 'PROCESSING' | 'READY' | 'FAILED';
+
+export interface LeagueVideo {
+  id: number;
+  maker: { userId: number; name: string };
+  mine: boolean;
+  setting: string;
+  settingLabel: string;
+  voice: string;
+  script: string;
+  status: LeagueVideoStatus;
+  error: string | null; // why it failed
+  videoUrl: string | null; // set once READY
+  durationSec: number | null;
+  sentAt: string | null; // emailed to the league
+  createdAt: string;
+}
+
+export interface LeagueVideos {
+  canCreate: boolean; // this league's commissioner, free or paying
+  access: 'free' | 'paid' | 'none'; // free = on the host's list; paid = Stripe Checkout per video
+  priceCents: number;
+  hasCredit: boolean; // a video already paid for and not yet used
+  canDraft: boolean; // "Write it for me" is available
+  settings: { id: string; label: string }[];
+  voices: { id: string; label: string; description: string }[];
+  maxScriptChars: number;
+  maxNotesChars: number;
+  videos: LeagueVideo[]; // sent ones, plus your own drafts
+}
+
+export interface NewLeagueVideo {
+  photo: string; // data URL, shrunk in the browser
+  setting: string;
+  voice: string;
+  script: string;
+  consent: boolean;
+}
+
+export const videoApi = {
+  list: async (leagueId: number): Promise<LeagueVideos> => {
+    const { data } = await api.get<LeagueVideos>(`/leagues/${leagueId}/videos`);
+    return data;
+  },
+
+  create: async (leagueId: number, body: NewLeagueVideo): Promise<LeagueVideo> => {
+    const { data } = await api.post<LeagueVideo>(`/leagues/${leagueId}/videos`, body);
+    return data;
+  },
+
+  // An AI first draft of the script, from the league's season
+  draft: async (leagueId: number, body: { notes: string; setting: string }): Promise<{ script: string }> => {
+    const { data } = await api.post<{ script: string }>(`/leagues/${leagueId}/videos/draft`, body);
+    return data;
+  },
+
+  // Stripe Checkout for one video; hasCredit = already paid, nothing to charge
+  checkout: async (leagueId: number): Promise<{ checkoutUrl: string | null; hasCredit: boolean }> => {
+    const { data } = await api.post<{ checkoutUrl: string | null; hasCredit: boolean }>(
+      `/leagues/${leagueId}/videos/checkout`
+    );
+    return data;
+  },
+
+  // Back from Stripe with its session id: was it paid?
+  confirmPayment: async (leagueId: number, sessionId: string): Promise<{ paid: boolean }> => {
+    const { data } = await api.post<{ paid: boolean }>(`/leagues/${leagueId}/videos/confirm-payment`, { sessionId });
+    return data;
+  },
+
+  send: async (leagueId: number, videoId: number): Promise<{ sentTo: number }> => {
+    const { data } = await api.post<{ sentTo: number }>(`/leagues/${leagueId}/videos/${videoId}/send`);
+    return data;
+  },
+};
+
 export const swapApi = {
   getState: async (leagueId: number): Promise<SwapState> => {
     const { data } = await api.get<SwapState>(`/leagues/${leagueId}/swap`);

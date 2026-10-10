@@ -24,6 +24,8 @@ model User {
   rosterSlots   RosterSlot[]
   draftQueues   DraftQueue[]
   swapClaims    SwapClaim[]
+  leagueVideos  LeagueVideo[]
+  videoPayments VideoPayment[]
 }
 
 model League {
@@ -65,6 +67,61 @@ model League {
   rosterSlots  RosterSlot[]
   draftQueues  DraftQueue[]
   swapClaims   SwapClaim[]
+  videos       LeagueVideo[]
+  videoPayments VideoPayment[]
+}
+
+// AI video message from a commissioner to their league (Oct 5 prototype):
+// photo + setting + voice + script, made into a talking video on fal.ai.
+// Only the finished video's URL is kept (fal's CDN, set to never expire);
+// the photo itself is never stored.
+model LeagueVideo {
+  id          Int               @id @default(autoincrement())
+  leagueId    Int
+  createdById Int
+  setting     String // a VIDEO_SETTINGS id
+  voice       String // a VIDEO_VOICES id
+  script      String
+  status      LeagueVideoStatus @default(PROCESSING)
+  error       String? // why it failed, shown to its maker
+  videoUrl    String?
+  durationSec Float?
+  sentAt      DateTime? // "Send to the league": the emails went out
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  league    League        @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  createdBy User          @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  payment   VideoPayment?
+
+  @@index([leagueId, createdAt])
+}
+
+// One Stripe Checkout payment for one commissioner video (Oct 10). It works
+// as a credit: paid with no videoId = a video still owed. Starting a video
+// claims it; a video that fails hands it back (videoId cleared), so the
+// retry is free and nobody is refunded or charged twice.
+model VideoPayment {
+  id              Int       @id @default(autoincrement())
+  leagueId        Int
+  userId          Int
+  stripeSessionId String    @unique
+  amountCents     Int
+  paidAt          DateTime? // null until Stripe reports the session paid
+  videoId         Int?      @unique // the video that used it
+  createdAt       DateTime  @default(now())
+
+  league League       @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video  LeagueVideo? @relation(fields: [videoId], references: [id], onDelete: SetNull)
+
+  @@index([userId, leagueId])
+}
+
+enum LeagueVideoStatus {
+  PROCESSING
+  READY
+  FAILED
 }
 
 enum DraftStatus {

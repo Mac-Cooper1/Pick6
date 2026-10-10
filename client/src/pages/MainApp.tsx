@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { leagueApi } from '../services/api';
 import { AppHeader } from '../components/AppHeader';
@@ -10,6 +10,7 @@ import { LeaderboardTab } from '../components/LeaderboardTab';
 import { WeekByWeekTab } from '../components/WeekByWeekTab';
 import { SwapTab } from '../components/SwapTab';
 import { SettingsTab } from '../components/SettingsTab';
+import { LeagueVideoBanner } from '../components/VideoMessages';
 
 type Tab = 'leaderboard' | 'myteam' | 'weeks' | 'league' | 'draft' | 'swap' | 'settings';
 
@@ -25,7 +26,12 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function MainApp() {
   const { leagueId } = useParams<{ leagueId: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>('leaderboard');
+  // Coming back from Stripe Checkout (a commissioner's video) lands on
+  // Settings, where the video maker picks the payment up
+  const [params] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<Tab>(() =>
+    params.get('video_paid') || params.get('video_canceled') ? 'settings' : 'leaderboard'
+  );
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
 
   const leagueIdNum = leagueId ? parseInt(leagueId) : NaN;
@@ -66,6 +72,8 @@ export function MainApp() {
 
       {/* Tab Content */}
       <main className="max-w-6xl mx-auto">
+        {/* The commissioner's latest video message, until watched */}
+        <LeagueVideoBanner leagueId={leagueIdNum} />
         {activeTab === 'leaderboard' && <LeaderboardTab leagueId={leagueIdNum} />}
         {activeTab === 'myteam' && <MyTeamTab leagueId={leagueIdNum} />}
         {activeTab === 'weeks' && <WeekByWeekTab leagueId={leagueIdNum} />}
