@@ -79,13 +79,26 @@ turn — standing instruction from Mac)**.
   escapes everything), `falClient` (Oct 5: fal.ai queue over plain fetch,
   `runFal(modelId, input, { keepForever })`; per-job retention header:
   the finished video never expires, in-between files after a day),
-  `videoService` (Oct 5 prototype, commissioner AI video messages: photo
-  → nano-banana edit into a setting → ElevenLabs voice → Kling AI Avatar
-  v2 Standard; ~$1.75 per 30s from Mac's fal credits; gated by `FAL_KEY`,
-  `VIDEO_CREATORS` (login emails) and being the league's commissioner;
-  own-face consent box; 5/day; jobs run in-process, so the startup sweep
-  fails any left mid-way; `processVideo` takes a `RunModel` so the smoke
-  test stubs fal).
+  `videoService` (commissioner AI video messages, Oct 5; paid Oct 10:
+  photo → nano-banana edit into a setting → ElevenLabs voice → Kling AI
+  Avatar v2 Standard → logo stamp; a real 38s video cost $2.21 and took 10
+  minutes. The maker must commission the league: free for `VIDEO_CREATORS`
+  emails, $3.50 via Stripe for everyone else once `STRIPE_SECRET_KEY` is set
+  and the league has drafted. A payment (`VideoPayment`) is a credit:
+  starting a video claims it, a failed video gives it back. Own-face
+  consent box; 5/day; jobs run in-process, so the startup sweep fails any
+  left mid-way; fal, the logo stamp and Stripe are all passed in, so the
+  smoke test stubs them), `videoBrand` (ffmpeg from `ffmpeg-static` stamps
+  `assets/video-watermark.png` (logo + `www.pick6cfb.com`) bottom-right at
+  28% of the frame's width, one thread at low priority,
+  re-hosts on fal; a failed stamp falls back to the plain video),
+  `stripeClient` (Checkout over plain fetch, no SDK, no webhooks: the app
+  asks Stripe on return and again when the maker opens their videos),
+  `scriptWriter` ("Write it for me": Claude via `@anthropic-ai/sdk`,
+  `claude-haiku-5-5` by default (Mac's call: ~0.1 cent a draft vs ~3 on
+  Opus 5.5; `VIDEO_SCRIPT_MODEL` overrides), drafts from a fact sheet of
+  **public** league data only; swap lists stay private, it reads
+  `getSwapState`).
 - **Client**: React 18 + Vite + Tailwind + TanStack Query. Routes: `/` =
   marketing landing (signed-out; signed-in users bounce to `/dashboard`),
   `/login` (`?mode=signup`, `?forgot=1` opens the reset form),
@@ -192,7 +205,7 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 151 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 176 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
@@ -205,7 +218,14 @@ live view from a real game's numbers, both perspectives), and the
 password reset (single use, expiry, rate limit, any-case but
 wildcard-proof lookup, login/reset token separation, HTML escaping; emails
 are captured in memory, nothing sends), and the commissioner video
-messages with fal stubbed (free, offline). It wipes/recreates its own data (league `SMOKE1`,
+messages with fal, the logo stamp, Stripe and Claude all stubbed (free,
+offline; it deletes those fake videos and payments when done, so `smoke1`
+can make real ones locally and isn't at its 5-a-day cap).
+**Trying videos locally**: `FAL_KEY` + `VIDEO_CREATORS=smoke1@test.local`
+in `server/.env` (free), log in as `smoke1@test.local`, Smoke League →
+Settings. To try paying, take `smoke1` off `VIDEO_CREATORS` and add a
+Stripe test key. The smoke test recreates the Smoke League, so it deletes
+any real videos made there. It wipes/recreates its own data (league `SMOKE1`,
 `smoke1@test.local`/`smoke123`) in its **own season year 2099** with a
 copied calendar, so real Game rows synced into the local DB can never
 collide with its synthetic games — **never point it at prod**. Before ending a turn: `npm run lint` in both packages, `npx tsc` in `server/`, `npm run build` in
@@ -238,6 +258,9 @@ user with `JWT_SECRET` from `server/.env` and drop it into `localStorage`
 league 6 `SMOKE1` (complete + scored), LIVE repro leagues 9–11 (users 21–32,
 `*@repro.local`) whose stalled pick clocks resume the moment a client
 connects. Tabs are component state, not routes — click the button by label.
+Don't log in through the form in headless Chrome: its save-password and
+leaked-password prompts then swallow every later click (no mouse events
+reach the page; a DOM `.click()` still works). Set the token instead.
 
 ## Gotchas (each one cost real debugging time)
 
@@ -435,13 +458,23 @@ view** (score/clock every minute, a field with the ball and the offense's
 direction; see `teamCardService` above). Evening: "at" for road games on
 Week by Week and League ("@" before), neutral sites "vs" both ways via the
 new `Game.neutralSite` (migration backfilled 2026's known neutral games).
-**Oct 5**: commissioner AI video messages, a free prototype (Mac's call;
-$10 Stripe checkout is the planned next step if friends love it). Settings
-→ Video message → photo/setting/voice/script → fal makes it in a few
-minutes → one tap emails the league; a banner plays it on the league page
-(`components/VideoMessages.tsx`). New `LeagueVideo` table. Ops: `FAL_KEY`
-and `VIDEO_CREATORS` on Render. A real fal run was not possible before
-Mac's key existed: the first real video is the test of the voice names. Prod puppets
+**Oct 5**: commissioner AI video messages (Settings → Video message →
+photo/setting/voice/script → fal makes it → one tap emails the league; a
+banner plays it on the league page, `components/VideoMessages.tsx`; table
+`LeagueVideo`). **Oct 10**: Mac's first real video worked locally ($2.21,
+10 minutes), then three additions: Claude drafts the script, the Pick 6
+logo (with the site's URL) is stamped on, and it costs $3.50 through Stripe for everyone off the
+free list (table `VideoPayment`). All on PR #32 (`main` merged in).
+Render needs `FAL_KEY`, `VIDEO_CREATORS`, `STRIPE_SECRET_KEY`,
+`ANTHROPIC_API_KEY`. Stripe's sandbox key works (a real $3.50 Checkout
+session was created and read back; Stripe hosts the page, live mode needs
+a live key on Render from an activated account; Mac's is a restricted
+`rk_live_` key that Stripe confirms can create and read Checkout
+sessions). A real Haiku draft works (9.8s). Local `server/.env` takes the
+sandbox `sk_test_` key only: a live key there charges real cards. Not yet
+run for real: an actual payment. The script Claude wrote by hand
+for the Kirven league on Oct 10 used two members' private swap-list lines
+from the DB: the in-app writer never does. Prod puppets
 test1/2/3 now log in as `mac.cooper002+test1/2/3@gmail.com` (their
 made-up Gmail addresses were strangers' inboxes; Mac OK'd the one-off
 UPDATE). Any new test account in prod: a `+` address of Mac's Gmail or

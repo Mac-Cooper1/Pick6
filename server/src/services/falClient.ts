@@ -73,3 +73,38 @@ export const runFal: RunModel = async (modelId, input, options = {}) => {
   // A failed job is COMPLETED too; its result call returns the error
   return falFetch(responseUrl);
 };
+
+// "Set to a large value for effectively unlimited storage" (fal's client docs)
+const KEEP_FOREVER_SECONDS = 31_536_000_000;
+
+/**
+ * Put a file of our own on fal's CDN and get its public URL: the finished
+ * video once the Pick 6 logo is stamped on. Two steps, the way fal's own
+ * client does it: ask for an upload URL, then PUT the bytes there. Uploads
+ * take a different retention header than jobs do (no "-Preference").
+ */
+export async function uploadToFal(
+  bytes: Buffer,
+  contentType: string,
+  fileName: string,
+  expireSeconds: number = KEEP_FOREVER_SECONDS
+): Promise<string> {
+  if (!isFalConfigured()) throw new Error('FAL_KEY is not set');
+  const started = (await falFetch('https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3', {
+    method: 'POST',
+    headers: { 'X-Fal-Object-Lifecycle': JSON.stringify({ expiration_duration_seconds: expireSeconds }) },
+    body: JSON.stringify({ content_type: contentType, file_name: fileName }),
+  })) as { upload_url?: string; file_url?: string };
+  if (!started.upload_url || !started.file_url) {
+    throw new Error(`fal upload: no URLs in ${JSON.stringify(started).slice(0, 200)}`);
+  }
+
+  const put = await fetch(started.upload_url, {
+    method: 'PUT',
+    headers: { 'Content-Type': contentType },
+    body: new Uint8Array(bytes),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!put.ok) throw new Error(`fal upload PUT ${put.status}: ${(await put.text()).slice(0, 200)}`);
+  return started.file_url;
+}

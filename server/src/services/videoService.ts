@@ -1,18 +1,26 @@
 /**
- * Commissioner video messages (Oct 5 prototype). A commissioner uploads a
- * photo of themselves, picks a setting and a voice and writes a script;
- * fal.ai makes a talking video, and one tap emails it to the league.
+ * Commissioner video messages (Oct 5; paid since Oct 10). A commissioner
+ * uploads a photo of themselves, picks a setting and a voice and writes a
+ * script (or has Claude draft one, scriptWriter); fal.ai makes a talking
+ * video, the Pick 6 logo is stamped on (videoBrand), and one tap emails it
+ * to the league.
  *
- * Three fal jobs (pay per use, about $1.75 for 30 seconds):
+ * Three fal jobs (pay per use; a real 38-second video cost $2.21 and took
+ * 10 minutes):
  *  1. setting: nano-banana edit puts the person in the scene ("as is" skips it)
  *  2. voice: ElevenLabs reads the script
  *  3. video: Kling AI Avatar v2 animates the photo to the voice
  * Only the finished video's URL is stored; the photo never is.
  *
- * Prototype gates, since every video is paid from Mac's fal credits: FAL_KEY
- * is set, the maker's email is in VIDEO_CREATORS, and they commission the
- * league. Own face only (fal's policy forbids anyone's likeness without
- * consent): the maker ticks a box saying the photo is them.
+ * Who can make one (they must commission the league, and FAL_KEY must be set):
+ *  - free: login emails in VIDEO_CREATORS (Mac, whoever he's treating)
+ *  - paid: everyone else, once STRIPE_SECRET_KEY is set and their league has
+ *    drafted (a real league, not a throwaway made to use the tool). $3.50
+ *    by default (VIDEO_PRICE_CENTS) through Stripe Checkout. A payment is a
+ *    credit (VideoPayment): starting a video claims it, a failed video hands
+ *    it back, so retries are free and nobody is charged twice.
+ * Own face only (fal's policy forbids anyone's likeness without consent):
+ * the maker ticks a box saying the photo is them.
  */
 
 import { LeagueVideo, LeagueVideoStatus, MemberRole } from '@prisma/client';
@@ -21,6 +29,9 @@ import { AppError } from '../middleware/errorHandler';
 import { errorMessage } from '../utils/errors';
 import { appUrl, renderEmail, sendEmail } from './emailService';
 import { isFalConfigured, runFal, RunModel } from './falClient';
+import { draftScript, isScriptWriterConfigured, MAX_NOTES_CHARS, MAX_SCRIPT_CHARS } from './scriptWriter';
+import { isStripeConfigured, PaymentGateway, stripeGateway } from './stripeClient';
+import { BrandVideo, stampWatermark } from './videoBrand';
 
 export const VIDEO_SETTINGS = [
   { id: 'press', label: 'Press conference', scene: 'at a college football press conference, standing behind a podium covered in microphones, a plain sponsor backdrop behind them, bright camera lighting' },
@@ -43,7 +54,7 @@ export const VIDEO_VOICES = [
   { id: 'Matilda', label: 'Matilda', description: 'Warm, friendly' },
 ] as const;
 
-export const MAX_SCRIPT_CHARS = 600; // about 40 seconds of speech
+export { MAX_SCRIPT_CHARS };
 const MIN_SCRIPT_CHARS = 10;
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024; // the app sends ~200 KB; this is a backstop
 export const VIDEOS_PER_DAY = 5;
@@ -96,13 +107,125 @@ async function membership(leagueId: number, userId: number) {
   return member;
 }
 
-async function canCreate(leagueId: number, userId: number): Promise<boolean> {
+export type VideoAccess = 'free' | 'paid' | 'none';
+
+/** Free for the VIDEO_CREATORS list; paid for other commissioners of drafted leagues */
+async function accessFor(leagueId: number, userId: number) {
   const member = await membership(leagueId, userId);
-  return (
-    isFalConfigured() &&
-    member.role === MemberRole.COMMISSIONER &&
-    creatorEmails().has(member.user.email.toLowerCase())
-  );
+  let access: VideoAccess = 'none';
+  if (isFalConfigured() && member.role === MemberRole.COMMISSIONER) {
+    if (creatorEmails().has(member.user.email.toLowerCase())) access = 'free';
+    else if (isStripeConfigured() && member.league.draftComplete) access = 'paid';
+  }
+  return { access, member };
+}
+
+/** Stripe's minimum charge is 50 cents; anything unusable falls back to $3.50 */
+export function videoPriceCents(): number {
+  const cents = parseInt(process.env.VIDEO_PRICE_CENTS ?? '', 10);
+  return Number.isInteger(cents) && cents >= 50 ? cents : 350;
+}
+
+// ---------- Payments: a paid checkout is a credit for one video ----------
+
+const DAY_MS = 24 * 3600 * 1000;
+const lastStripeCheck = new Map<string, number>();
+
+function findCredit(leagueId: number, userId: number) {
+  return prisma.videoPayment.findFirst({
+    where: { leagueId, userId, paidAt: { not: null }, videoId: null },
+    orderBy: { id: 'asc' },
+  });
+}
+
+async function markPaidIfPaid(payment: { id: number; stripeSessionId: string }, gateway: PaymentGateway) {
+  const session = await gateway.getCheckout(payment.stripeSessionId);
+  if (!session.paid) return false;
+  await prisma.videoPayment.updateMany({ where: { id: payment.id, paidAt: null }, data: { paidAt: new Date() } });
+  return true;
+}
+
+/**
+ * Ask Stripe about this maker's unfinished checkouts from the last day, so
+ * paying and then closing the tab still ends in a credit. At most once a
+ * minute per maker: their video list polls every few seconds.
+ */
+async function refreshPayments(leagueId: number, userId: number, gateway: PaymentGateway, force = false) {
+  const key = `${leagueId}:${userId}`;
+  if (!force && Date.now() - (lastStripeCheck.get(key) ?? 0) < 60_000) return;
+  lastStripeCheck.set(key, Date.now());
+  const pending = await prisma.videoPayment.findMany({
+    where: { leagueId, userId, paidAt: null, createdAt: { gte: new Date(Date.now() - DAY_MS) } },
+    orderBy: { id: 'desc' },
+    take: 3,
+  });
+  for (const payment of pending) {
+    await markPaidIfPaid(payment, gateway).catch((error) =>
+      console.error(`[Video] Stripe check for payment ${payment.id} failed: ${errorMessage(error)}`)
+    );
+  }
+}
+
+/** Open Stripe Checkout for one video, unless the maker already has a credit */
+export async function startCheckout(
+  leagueId: number,
+  userId: number,
+  gateway: PaymentGateway = stripeGateway
+): Promise<{ checkoutUrl: string | null; hasCredit: boolean }> {
+  const { access, member } = await accessFor(leagueId, userId);
+  if (access === 'free') return { checkoutUrl: null, hasCredit: true };
+  if (access !== 'paid') throw new AppError('Video messages are not available for this league', 403);
+
+  await refreshPayments(leagueId, userId, gateway, true);
+  if (await findCredit(leagueId, userId)) return { checkoutUrl: null, hasCredit: true };
+
+  const amountCents = videoPriceCents();
+  let session;
+  try {
+    session = await gateway.createCheckout({
+      amountCents,
+      productName: `Pick 6 video message (${member.league.name})`,
+      successUrl: appUrl(`/league/${leagueId}?video_paid={CHECKOUT_SESSION_ID}`),
+      cancelUrl: appUrl(`/league/${leagueId}?video_canceled=1`),
+      email: member.user.email,
+      metadata: { leagueId: String(leagueId), userId: String(userId) },
+    });
+  } catch (error) {
+    console.error(`[Video] Checkout failed: ${errorMessage(error)}`);
+    throw new AppError("Couldn't open checkout. Try again in a minute.", 502);
+  }
+  if (!session.url) throw new AppError("Couldn't open checkout. Try again in a minute.", 502);
+  await prisma.videoPayment.create({ data: { leagueId, userId, stripeSessionId: session.id, amountCents } });
+  return { checkoutUrl: session.url, hasCredit: false };
+}
+
+/** The buyer is back from Stripe: was that session paid? (Only ever their own.) */
+export async function confirmPayment(
+  leagueId: number,
+  userId: number,
+  sessionId: unknown,
+  gateway: PaymentGateway = stripeGateway
+): Promise<{ paid: boolean }> {
+  if (typeof sessionId !== 'string' || !sessionId) throw new AppError('Missing checkout session', 400);
+  const payment = await prisma.videoPayment.findFirst({ where: { stripeSessionId: sessionId, leagueId, userId } });
+  if (!payment) throw new AppError('Payment not found', 404);
+  if (payment.paidAt) return { paid: true };
+  try {
+    return { paid: await markPaidIfPaid(payment, gateway) };
+  } catch (error) {
+    console.error(`[Video] Stripe check for payment ${payment.id} failed: ${errorMessage(error)}`);
+    throw new AppError("Couldn't confirm the payment yet. Reload in a moment.", 502);
+  }
+}
+
+/** Claude's first draft of the script, from the league's season (scriptWriter) */
+export async function draftVideoScript(leagueId: number, userId: number, body: unknown): Promise<{ script: string }> {
+  const { access } = await accessFor(leagueId, userId);
+  if (access === 'none') throw new AppError('Video messages are not available for this league', 403);
+  if (!isScriptWriterConfigured()) throw new AppError('The script writer is not set up', 503);
+  const input = (body ?? {}) as Record<string, unknown>;
+  const setting = VIDEO_SETTINGS.find((s) => s.id === input.setting)?.label;
+  return { script: await draftScript(leagueId, userId, { notes: input.notes, setting }) };
 }
 
 function toView(video: LeagueVideo & { createdBy: { name: string } }, userId: number): VideoView {
@@ -124,8 +247,10 @@ function toView(video: LeagueVideo & { createdBy: { name: string } }, userId: nu
 }
 
 /** Sent videos for everyone, plus the maker's own unsent ones */
-export async function listVideos(leagueId: number, userId: number) {
-  const allowed = await canCreate(leagueId, userId);
+export async function listVideos(leagueId: number, userId: number, gateway: PaymentGateway = stripeGateway) {
+  const { access } = await accessFor(leagueId, userId);
+  if (access === 'paid') await refreshPayments(leagueId, userId, gateway);
+  const hasCredit = access === 'paid' && Boolean(await findCredit(leagueId, userId));
   const videos = await prisma.leagueVideo.findMany({
     where: {
       leagueId,
@@ -136,10 +261,15 @@ export async function listVideos(leagueId: number, userId: number) {
     take: 20,
   });
   return {
-    canCreate: allowed,
+    canCreate: access !== 'none',
+    access,
+    priceCents: videoPriceCents(),
+    hasCredit, // paid for and not yet used: the next video won't charge
+    canDraft: access !== 'none' && isScriptWriterConfigured(),
     settings: VIDEO_SETTINGS.map(({ id, label }) => ({ id, label })),
     voices: VIDEO_VOICES,
     maxScriptChars: MAX_SCRIPT_CHARS,
+    maxNotesChars: MAX_NOTES_CHARS,
     videos: videos.map((video) => toView(video, userId)),
   };
 }
@@ -181,10 +311,16 @@ export async function createVideo(
   leagueId: number,
   userId: number,
   body: unknown,
-  { runModel = runFal, start = true }: { runModel?: RunModel; start?: boolean } = {}
+  {
+    runModel = runFal,
+    brand = stampWatermark,
+    gateway = stripeGateway,
+    start = true,
+  }: { runModel?: RunModel; brand?: BrandVideo; gateway?: PaymentGateway; start?: boolean } = {}
 ): Promise<VideoView> {
-  if (!(await canCreate(leagueId, userId))) {
-    throw new AppError('Video messages are invite-only while they are a prototype', 403);
+  const { access } = await accessFor(leagueId, userId);
+  if (access === 'none') {
+    throw new AppError('Video messages are not available for this league', 403);
   }
   const input = validate(body);
 
@@ -195,12 +331,31 @@ export async function createVideo(
     throw new AppError(`That's ${VIDEOS_PER_DAY} videos in a day. Try again tomorrow.`, 429);
   }
 
-  const video = await prisma.leagueVideo.create({
-    data: { leagueId, createdById: userId, setting: input.setting, voice: input.voice, script: input.script },
-    include: { createdBy: { select: { name: true } } },
+  // A paid maker needs a credit: a checkout that Stripe says was paid
+  let credit: { id: number } | null = null;
+  if (access === 'paid') {
+    await refreshPayments(leagueId, userId, gateway, true);
+    credit = await findCredit(leagueId, userId);
+    if (!credit) throw new AppError('Pay for the video first', 402);
+  }
+
+  const video = await prisma.$transaction(async (tx) => {
+    const created = await tx.leagueVideo.create({
+      data: { leagueId, createdById: userId, setting: input.setting, voice: input.voice, script: input.script },
+      include: { createdBy: { select: { name: true } } },
+    });
+    if (credit) {
+      // Only if it's still unused: two tabs can't spend one payment twice
+      const claimed = await tx.videoPayment.updateMany({
+        where: { id: credit.id, videoId: null },
+        data: { videoId: created.id },
+      });
+      if (claimed.count === 0) throw new AppError('Pay for the video first', 402);
+    }
+    return created;
   });
   if (start) {
-    processVideo(video.id, input, runModel).catch((error) =>
+    processVideo(video.id, input, runModel, brand).catch((error) =>
       console.error(`[Video] ${video.id} crashed: ${errorMessage(error)}`)
     );
   }
@@ -230,8 +385,18 @@ async function step<T>(friendly: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** The three fal jobs. Exported for the smoke test (with a stub runModel). */
-export async function processVideo(id: number, input: NewVideo, runModel: RunModel = runFal): Promise<void> {
+/** A failed video gives its payment back: the maker's next try is free */
+function releaseCredit(videoIds: number[]) {
+  return prisma.videoPayment.updateMany({ where: { videoId: { in: videoIds } }, data: { videoId: null } });
+}
+
+/** The three fal jobs, then the logo. Exported for the smoke test (with stubs). */
+export async function processVideo(
+  id: number,
+  input: NewVideo,
+  runModel: RunModel = runFal,
+  brand: BrandVideo = stampWatermark
+): Promise<void> {
   try {
     let image = input.photo;
     const setting = VIDEO_SETTINGS.find((s) => s.id === input.setting);
@@ -271,10 +436,18 @@ export async function processVideo(id: number, input: NewVideo, runModel: RunMod
           { keepForever: true }
         )
     );
-    const videoUrl = await step("Couldn't animate the photo. Try again in a minute.", async () =>
+    let videoUrl = await step("Couldn't animate the photo. Try again in a minute.", async () =>
       urlAt(animated, ['video', 'url'], 'video')
     );
     const duration = (animated as { duration?: unknown }).duration;
+
+    // The Pick 6 logo in the corner. Branding never costs anyone their
+    // video: if the stamp fails, the plain one goes out.
+    try {
+      videoUrl = await brand(videoUrl);
+    } catch (error) {
+      console.error(`[Video] ${id}: logo stamp failed, using the plain video: ${errorMessage(error)}`);
+    }
 
     await prisma.leagueVideo.updateMany({
       where: { id, status: LeagueVideoStatus.PROCESSING },
@@ -293,6 +466,7 @@ export async function processVideo(id: number, input: NewVideo, runModel: RunMod
         error: error instanceof StepError ? error.message : 'Something went wrong making the video. Try again.',
       },
     });
+    await releaseCredit([id]);
     if (!(error instanceof StepError)) console.error(`[Video] ${id} failed: ${errorMessage(error)}`);
   }
 }
@@ -302,12 +476,19 @@ export async function processVideo(id: number, input: NewVideo, runModel: RunMod
  * flight. Called once at startup: anything still PROCESSING is orphaned.
  */
 export async function failInterruptedVideos(): Promise<number> {
-  const { count } = await prisma.leagueVideo.updateMany({
+  const stuck = await prisma.leagueVideo.findMany({
     where: { status: LeagueVideoStatus.PROCESSING },
+    select: { id: true },
+  });
+  if (stuck.length === 0) return 0;
+  const ids = stuck.map((video) => video.id);
+  await prisma.leagueVideo.updateMany({
+    where: { id: { in: ids }, status: LeagueVideoStatus.PROCESSING },
     data: { status: LeagueVideoStatus.FAILED, error: 'Interrupted by an app update while it was being made. Try again.' },
   });
-  if (count > 0) console.log(`[Video] Marked ${count} interrupted video(s) failed`);
-  return count;
+  await releaseCredit(ids);
+  console.log(`[Video] Marked ${ids.length} interrupted video(s) failed`);
+  return ids.length;
 }
 
 /** One tap: email the video to every other member. A video goes out once. */

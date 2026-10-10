@@ -1,9 +1,12 @@
 /**
- * Commissioner video messages (Oct 5 prototype). In Settings the
+ * Commissioner video messages (Oct 5; paid since Oct 10). In Settings the
  * commissioner makes an AI talking video of themselves (photo, setting,
- * voice, script); once it's ready, one tap emails it to the league, and a
- * banner on the league page plays it for everyone. The server makes the
- * video on fal.ai in a few minutes; this file only ever sees the result.
+ * voice, and a script they write or have AI draft); once it's ready, one
+ * tap emails it to the league, and a banner on the league page plays it for
+ * everyone. Free for the host's list; everyone else pays per video through
+ * Stripe Checkout (off to Stripe and back, the form kept in sessionStorage).
+ * The server makes the video on fal.ai in about ten minutes; this file only
+ * ever sees the result.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -14,12 +17,13 @@ import {
   CheckCircle,
   Megaphone,
   PaperPlaneTilt,
+  Sparkle,
   UploadSimple,
   VideoCamera,
   WarningCircle,
   X,
 } from '@phosphor-icons/react';
-import { apiErrorMessage, LeagueVideo, videoApi } from '../services/api';
+import { apiErrorMessage, LeagueVideo, NewLeagueVideo, videoApi } from '../services/api';
 import { Button } from './Button';
 import { ErrorMessage } from './ErrorMessage';
 
@@ -79,7 +83,7 @@ function MyVideo({ video, onSend, sending }: { video: LeagueVideo; onSend: () =>
       {video.status === 'PROCESSING' && (
         <p className="flex items-center gap-2 text-sm text-gray-600">
           <span className="inline-block animate-spin rounded-full border-2 border-green-200 border-t-green-700 h-4 w-4 shrink-0" />
-          Making it. Usually 2 to 5 minutes, and you can leave this page.
+          Making it. This takes about 10 minutes, and you can leave this page.
         </p>
       )}
       {video.status === 'FAILED' && (
@@ -110,37 +114,146 @@ function MyVideo({ video, onSend, sending }: { video: LeagueVideo; onSend: () =>
   );
 }
 
+// The form survives the trip to Stripe and back in sessionStorage (this tab
+// only, gone when it closes). The server never holds the photo until the
+// video is actually being made.
+const draftKey = (leagueId: number) => `pick6_video_draft_${leagueId}`;
+
+function saveForm(leagueId: number, form: NewLeagueVideo & { notes: string }) {
+  try {
+    sessionStorage.setItem(draftKey(leagueId), JSON.stringify(form));
+  } catch {
+    // storage full or blocked: after paying they fill the form in again
+  }
+}
+
+function loadForm(leagueId: number): (NewLeagueVideo & { notes: string }) | null {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(draftKey(leagueId)) ?? 'null');
+    return saved && typeof saved.script === 'string' ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearForm(leagueId: number) {
+  try {
+    sessionStorage.removeItem(draftKey(leagueId));
+  } catch {
+    // nothing to clear
+  }
+}
+
+function formatPrice(cents: number): string {
+  return `$${(cents / 100).toFixed(2).replace(/\.00$/, '')}`;
+}
+
 export function VideoComposer({ leagueId }: { leagueId: number }) {
   const queryClient = useQueryClient();
   const { data } = useLeagueVideos(leagueId);
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [setting, setSetting] = useState('press');
-  const [voice, setVoice] = useState('Brian');
-  const [script, setScript] = useState('');
-  const [consent, setConsent] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const [saved] = useState(() => loadForm(leagueId));
+  const [photo, setPhoto] = useState<string | null>(saved?.photo || null);
+  const [setting, setSetting] = useState(saved?.setting ?? 'press');
+  const [voice, setVoice] = useState(saved?.voice ?? 'Brian');
+  const [script, setScript] = useState(saved?.script ?? '');
+  const [notes, setNotes] = useState(saved?.notes ?? '');
+  const [consent, setConsent] = useState(saved?.consent ?? false);
   const [error, setError] = useState<string | null>(null);
-  const [sentNote, setSentNote] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const handledReturn = useRef<string | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['leagueVideos', leagueId] });
+  const started = () => {
+    clearForm(leagueId);
+    setScript('');
+    setError(null);
+    refresh();
+  };
   const create = useMutation({
     mutationFn: () => videoApi.create(leagueId, { photo: photo ?? '', setting, voice, script, consent }),
     onSuccess: () => {
-      setScript('');
-      setError(null);
-      setSentNote(null);
-      refresh();
+      started();
+      setNotice('Your video is being made. It takes about 10 minutes.');
     },
     onError: (err) => setError(apiErrorMessage(err, "Couldn't start the video")),
+  });
+  // Paying: remember the form, then off to Stripe (unless one is already paid for)
+  const checkout = useMutation({
+    mutationFn: async () => {
+      saveForm(leagueId, { photo: photo ?? '', setting, voice, script, consent, notes });
+      const { checkoutUrl, hasCredit } = await videoApi.checkout(leagueId);
+      if (checkoutUrl) window.location.assign(checkoutUrl);
+      else if (hasCredit) create.mutate();
+    },
+    onError: (err) => setError(apiErrorMessage(err, "Couldn't open checkout")),
+  });
+  const draft = useMutation({
+    mutationFn: () => videoApi.draft(leagueId, { notes, setting }),
+    onSuccess: ({ script: drafted }) => {
+      setScript(drafted);
+      setError(null);
+    },
+    onError: (err) => setError(apiErrorMessage(err, "Couldn't write a draft")),
   });
   const send = useMutation({
     mutationFn: (videoId: number) => videoApi.send(leagueId, videoId),
     onSuccess: ({ sentTo }) => {
-      setSentNote(`Sent to ${sentTo} ${sentTo === 1 ? 'member' : 'members'} by email. It's on the league page too.`);
+      setNotice(`Sent to ${sentTo} ${sentTo === 1 ? 'member' : 'members'} by email. It's on the league page too.`);
       refresh();
     },
     onError: (err) => setError(apiErrorMessage(err, "Couldn't send it")),
   });
+
+  // Back from Stripe: ?video_paid=<session> (paid, or so the URL says: the
+  // server asks Stripe) or ?video_canceled=1. Once per visit.
+  const paidSession = params.get('video_paid');
+  const canceled = params.get('video_canceled');
+  useEffect(() => {
+    const token = paidSession ?? (canceled ? 'canceled' : null);
+    if (!token || handledReturn.current === token) return;
+    handledReturn.current = token;
+    const next = new URLSearchParams(params);
+    next.delete('video_paid');
+    next.delete('video_canceled');
+    setParams(next, { replace: true });
+
+    if (!paidSession) {
+      setNotice('Checkout canceled. Nothing was charged, and your video is still here.');
+      return;
+    }
+    (async () => {
+      try {
+        const { paid } = await videoApi.confirmPayment(leagueId, paidSession);
+        if (!paid) {
+          setError("That payment didn't go through. Nothing was charged.");
+          return;
+        }
+        const form = loadForm(leagueId);
+        if (form?.photo && form.consent && form.script.trim().length >= MIN_SCRIPT_CHARS) {
+          await videoApi.create(leagueId, form);
+          clearForm(leagueId);
+          setScript('');
+          setNotice('Payment received. Your video is being made: about 10 minutes.');
+        } else {
+          setNotice("Payment received. Fill this in and make your video: it's already paid for.");
+        }
+      } catch (err) {
+        setError(apiErrorMessage(err, "Couldn't confirm the payment. Reload in a moment: you won't be charged twice."));
+      } finally {
+        queryClient.invalidateQueries({ queryKey: ['leagueVideos', leagueId] });
+      }
+    })();
+  }, [paidSession, canceled, params, setParams, leagueId, queryClient]);
+
+  // After a round trip to Stripe, bring the card back into view
+  const cameBack = handledReturn.current !== null;
+  const loaded = Boolean(data?.canCreate);
+  useEffect(() => {
+    if (cameBack && loaded) cardRef.current?.scrollIntoView({ block: 'start' });
+  }, [cameBack, loaded]);
 
   if (!data?.canCreate) return null;
 
@@ -148,17 +261,23 @@ export function VideoComposer({ leagueId }: { leagueId: number }) {
   const max = data.maxScriptChars;
   const length = script.trim().length;
   const canMake = Boolean(photo) && consent && length >= MIN_SCRIPT_CHARS && length <= max;
+  const needsPayment = data.access === 'paid' && !data.hasCredit;
+  const busy = create.isPending || checkout.isPending;
 
   return (
-    <div className="card p-4 sm:p-6 mb-4 sm:mb-6">
+    <div ref={cardRef} className="card p-4 sm:p-6 mb-4 sm:mb-6 scroll-mt-4">
       <div className="flex items-center gap-3 mb-2">
         <span className="label text-amber-700">Commissioner</span>
         <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Video message</h3>
       </div>
       <p className="text-sm text-gray-600 mb-4">
         Make an AI video of yourself reading your own script, then send it to the whole league in one tap.
-        It takes a few minutes to make.
+        It takes about 10 minutes to make.
+        {data.access === 'paid' && ` ${formatPrice(data.priceCents)} per video.`}
       </p>
+      {notice && (
+        <p className="mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">{notice}</p>
+      )}
       {error && (
         <div className="mb-4">
           <ErrorMessage message={error} />
@@ -237,9 +356,34 @@ export function VideoComposer({ leagueId }: { leagueId: number }) {
       <label htmlFor="video-script" className="label mb-1.5 block">
         Script
       </label>
+      {data.canDraft && (
+        <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <label htmlFor="video-notes" className="block text-sm font-semibold text-gray-800 mb-1.5">
+            Want a first draft?
+          </label>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              id="video-notes"
+              type="text"
+              maxLength={data.maxNotesChars}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Optional: anything it should know? e.g. James is my brother"
+              className="min-w-0 flex-1 px-3.5 py-2.5 text-base bg-white border border-gray-300 rounded-lg text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-600 focus:border-green-600"
+            />
+            <Button variant="outline" onClick={() => draft.mutate()} disabled={draft.isPending} className="shrink-0">
+              <Sparkle size={18} weight="fill" aria-hidden />
+              {draft.isPending ? 'Writing...' : script.trim() ? 'Write another' : 'Write it for me'}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500 mt-1.5">
+            AI writes it from your league's standings, rosters and swaps. Read it over and make it yours.
+          </p>
+        </div>
+      )}
       <textarea
         id="video-script"
-        rows={4}
+        rows={5}
         maxLength={max}
         value={script}
         onChange={(e) => setScript(e.target.value)}
@@ -260,15 +404,21 @@ export function VideoComposer({ leagueId }: { leagueId: number }) {
         <span>This photo is of me, and I&apos;m OK with it being turned into an AI video the league can watch.</span>
       </label>
 
-      <Button onClick={() => create.mutate()} disabled={!canMake || create.isPending}>
+      <Button onClick={() => (needsPayment ? checkout.mutate() : create.mutate())} disabled={!canMake || busy}>
         <VideoCamera size={18} weight="bold" aria-hidden />
-        {create.isPending ? 'Starting...' : 'Make my video'}
+        {busy ? 'Starting...' : needsPayment ? `Pay ${formatPrice(data.priceCents)} and make my video` : 'Make my video'}
       </Button>
+      {data.access === 'paid' && (
+        <p className="text-xs text-gray-500 mt-2">
+          {data.hasCredit
+            ? "You have a video paid for. This one won't charge you."
+            : 'Secure checkout by Stripe. If a video fails, your next try is free.'}
+        </p>
+      )}
 
       {mine.length > 0 && (
         <div className="mt-6 pt-4 border-t border-gray-200 space-y-3">
           <p className="label">Your videos</p>
-          {sentNote && <p className="text-sm text-green-800">{sentNote}</p>}
           {mine.map((v) => (
             <MyVideo
               key={v.id}

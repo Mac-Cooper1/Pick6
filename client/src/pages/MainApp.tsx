@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { leagueApi } from '../services/api';
 import { AppHeader } from '../components/AppHeader';
@@ -26,7 +26,12 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function MainApp() {
   const { leagueId } = useParams<{ leagueId: string }>();
-  const [activeTab, setActiveTab] = useState<Tab>('leaderboard');
+  // Coming back from Stripe Checkout (a commissioner's video) lands on
+  // Settings, where the video maker picks the payment up
+  const [params] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<Tab>(() =>
+    params.get('video_paid') || params.get('video_canceled') ? 'settings' : 'leaderboard'
+  );
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
 
   const leagueIdNum = leagueId ? parseInt(leagueId) : NaN;

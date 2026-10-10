@@ -37,8 +37,22 @@ import {
 import { getStandings } from '../src/services/standingsService';
 import { captureEmails, renderEmail } from '../src/services/emailService';
 import { findUserByEmail, requestPasswordReset, resetPassword } from '../src/services/authService';
-import { createVideo, failInterruptedVideos, listVideos, processVideo, sendVideo, VIDEOS_PER_DAY } from '../src/services/videoService';
+import {
+  confirmPayment,
+  createVideo,
+  draftVideoScript,
+  failInterruptedVideos,
+  listVideos,
+  processVideo,
+  sendVideo,
+  startCheckout,
+  videoPriceCents,
+  VIDEOS_PER_DAY,
+} from '../src/services/videoService';
 import { RunModel } from '../src/services/falClient';
+import { BrandVideo } from '../src/services/videoBrand';
+import { PaymentGateway } from '../src/services/stripeClient';
+import { buildLeagueFacts, cleanScript, CompleteScript, draftScript } from '../src/services/scriptWriter';
 import { generatePasswordResetToken, generateToken, verifyToken } from '../src/utils/auth';
 
 // The smoke league lives in its own season so its synthetic games can never
@@ -1129,29 +1143,39 @@ async function main() {
     'live: games not live (or missing from the scoreboard) are left alone'
   );
 
-  // ---------- Commissioner video messages (fal stubbed: free, offline) ----------
+  // ---------- Commissioner video messages (fal, Stripe and Claude stubbed: free, offline) ----------
   console.log('— Video messages');
-  const savedFal = { key: process.env.FAL_KEY, creators: process.env.VIDEO_CREATORS };
+  const savedEnv = Object.fromEntries(
+    ['FAL_KEY', 'VIDEO_CREATORS', 'STRIPE_SECRET_KEY', 'ANTHROPIC_API_KEY', 'VIDEO_PRICE_CENTS'].map((k) => [k, process.env[k]])
+  );
   process.env.FAL_KEY = 'smoke-test-key';
   process.env.VIDEO_CREATORS = 'someone-else@test.local';
+  delete process.env.STRIPE_SECRET_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.VIDEO_PRICE_CENTS;
   const photo = 'data:image/jpeg;base64,' + Buffer.from('not really a jpeg').toString('base64');
   const newVideo = (extra: Record<string, unknown> = {}) => ({
     photo, setting: 'press', voice: 'Brian', script: 'Week six is here. Set your swap lists, cowards.', consent: true, ...extra,
   });
-  assert(!(await listVideos(league.id, alice.id)).canCreate, 'video: a commissioner not on VIDEO_CREATORS cannot make one');
-  process.env.VIDEO_CREATORS = ' Smoke1@Test.Local , other@test.local';
   assert(
-    (await listVideos(league.id, alice.id)).canCreate && !(await listVideos(league.id, bob.id)).canCreate,
-    'video: an allowlisted commissioner can (any case), a member cannot'
+    !(await listVideos(league.id, alice.id)).canCreate,
+    'video: with no Stripe key, a commissioner off the free list cannot make one'
   );
-  await expectThrow(() => createVideo(league.id, bob.id, newVideo(), { start: false }), 'video: a member cannot start one', 'invite-only');
+  process.env.VIDEO_CREATORS = ' Smoke1@Test.Local , other@test.local';
+  const freeList = await listVideos(league.id, alice.id);
+  assert(
+    freeList.canCreate && freeList.access === 'free' && !(await listVideos(league.id, bob.id)).canCreate,
+    'video: a commissioner on the free list can (any case), a member cannot'
+  );
+  await expectThrow(() => createVideo(league.id, bob.id, newVideo(), { start: false }), 'video: a member cannot start one', 'not available');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ consent: false }), { start: false }), 'video: own-face consent required', 'photo is of you');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ photo: 'https://example.com/me.jpg' }), { start: false }), 'video: photo must be an uploaded image', 'Add a photo');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ setting: 'moon' }), { start: false }), 'video: unknown setting rejected', 'Pick a setting');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ voice: 'Morgan Freeman' }), { start: false }), 'video: unknown voice rejected', 'Pick a voice');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ script: 'x'.repeat(601) }), { start: false }), 'video: script capped at 600 characters', 'under 600');
 
-  // A stub fal: records each call, answers like the real models
+  // A stub fal: records each call, answers like the real models. A stub
+  // logo stamp: a new URL, the way the real one re-hosts the stamped file.
   const falCalls: { modelId: string; input: Record<string, unknown>; keepForever?: boolean }[] = [];
   const stubFal = (failOn?: string, noUrl = false): RunModel => async (modelId, input, options) => {
     falCalls.push({ modelId, input, keepForever: options?.keepForever });
@@ -1160,13 +1184,24 @@ async function main() {
     if (modelId.includes('elevenlabs')) return { audio: { url: 'https://fal.media/voice.mp3' } };
     return noUrl ? { video: {} } : { video: { url: 'https://fal.media/final.mp4' }, duration: 12.5 };
   };
+  const stamped: string[] = [];
+  const stubBrand: BrandVideo = async (url) => {
+    stamped.push(url);
+    return 'https://fal.media/final-with-logo.mp4';
+  };
+  const brokenBrand: BrandVideo = async () => {
+    throw new Error('ffmpeg: no such filter');
+  };
   const readyVideo = await createVideo(league.id, alice.id, newVideo(), { start: false });
   assert(readyVideo.status === 'PROCESSING' && readyVideo.mine, 'video: starts PROCESSING');
-  await processVideo(readyVideo.id, { photo, setting: 'press', voice: 'Brian', script: readyVideo.script }, stubFal());
+  await processVideo(readyVideo.id, { photo, setting: 'press', voice: 'Brian', script: readyVideo.script }, stubFal(), stubBrand);
   const readyRow = await prisma.leagueVideo.findUnique({ where: { id: readyVideo.id } });
   assert(
-    readyRow?.status === 'READY' && readyRow.videoUrl === 'https://fal.media/final.mp4' && readyRow.durationSec === 12.5,
-    'video: three fal jobs end READY with the video URL and length'
+    readyRow?.status === 'READY' &&
+      readyRow.videoUrl === 'https://fal.media/final-with-logo.mp4' &&
+      readyRow.durationSec === 12.5 &&
+      stamped.join() === 'https://fal.media/final.mp4',
+    'video: three fal jobs, then the logo stamp: READY with the stamped video and its length'
   );
   const [sceneCall, voiceCall, videoCall] = falCalls;
   assert(
@@ -1179,12 +1214,17 @@ async function main() {
   );
   falCalls.length = 0;
   const asIs = await createVideo(league.id, alice.id, newVideo({ setting: 'asis' }), { start: false });
-  await processVideo(asIs.id, { photo, setting: 'asis', voice: 'Bill', script: asIs.script }, stubFal());
+  await processVideo(asIs.id, { photo, setting: 'asis', voice: 'Bill', script: asIs.script }, stubFal(), brokenBrand);
+  const asIsRow = await prisma.leagueVideo.findUnique({ where: { id: asIs.id } });
   assert(falCalls.length === 2 && falCalls[1].input.image_url === photo, '"My photo as is" skips the setting job');
+  assert(
+    asIsRow?.status === 'READY' && asIsRow.videoUrl === 'https://fal.media/final.mp4',
+    'video: if the logo stamp fails, the plain video still goes out'
+  );
   const failedVideo = await createVideo(league.id, alice.id, newVideo(), { start: false });
-  await processVideo(failedVideo.id, { photo, setting: 'press', voice: 'Brian', script: failedVideo.script }, stubFal('kling'));
+  await processVideo(failedVideo.id, { photo, setting: 'press', voice: 'Brian', script: failedVideo.script }, stubFal('kling'), stubBrand);
   const noUrl = await createVideo(league.id, alice.id, newVideo(), { start: false });
-  await processVideo(noUrl.id, { photo, setting: 'press', voice: 'Brian', script: noUrl.script }, stubFal(undefined, true));
+  await processVideo(noUrl.id, { photo, setting: 'press', voice: 'Brian', script: noUrl.script }, stubFal(undefined, true), stubBrand);
   const [failedRow, noUrlRow] = await Promise.all([
     prisma.leagueVideo.findUnique({ where: { id: failedVideo.id } }),
     prisma.leagueVideo.findUnique({ where: { id: noUrl.id } }),
@@ -1212,7 +1252,7 @@ async function main() {
   await expectThrow(() => sendVideo(league.id, readyVideo.id, alice.id), 'video: sends once', 'Already sent');
   const bobVideosAfter = await listVideos(league.id, bob.id);
   assert(
-    bobVideosAfter.videos.length === 1 && bobVideosAfter.videos[0].videoUrl === 'https://fal.media/final.mp4' && !bobVideosAfter.videos[0].mine,
+    bobVideosAfter.videos.length === 1 && bobVideosAfter.videos[0].videoUrl === 'https://fal.media/final-with-logo.mp4' && !bobVideosAfter.videos[0].mine,
     'video: once sent, every member sees it'
   );
 
@@ -1222,10 +1262,151 @@ async function main() {
   assert(interruptedRow?.status === 'FAILED' && !!interruptedRow.error?.includes('Interrupted'), 'video: a restart fails videos left mid-way');
   assert(VIDEOS_PER_DAY === 5, 'video: 5 a day per maker');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo(), { start: false }), 'video: the 6th in a day is refused', 'Try again tomorrow');
-  process.env.FAL_KEY = savedFal.key;
-  process.env.VIDEO_CREATORS = savedFal.creators;
-  if (savedFal.key === undefined) delete process.env.FAL_KEY;
-  if (savedFal.creators === undefined) delete process.env.VIDEO_CREATORS;
+  await prisma.leagueVideo.deleteMany({ where: { leagueId: league.id } }); // room under the daily cap for the paid checks
+
+  // ---- Paying: everyone off the free list, through a stub Stripe ----
+  process.env.VIDEO_CREATORS = 'someone-else@test.local';
+  process.env.STRIPE_SECRET_KEY = 'sk_test_smoke';
+  const stripeSessions = new Map<string, { paid: boolean; amountCents: number }>();
+  const stubStripe: PaymentGateway = {
+    async createCheckout(request) {
+      const id = `cs_smoke_${stripeSessions.size + 1}`;
+      stripeSessions.set(id, { paid: false, amountCents: request.amountCents });
+      return { id, url: `https://checkout.stripe.test/${id}?back=${encodeURIComponent(request.successUrl)}`, paid: false, amountCents: request.amountCents };
+    },
+    async getCheckout(id) {
+      const session = stripeSessions.get(id);
+      if (!session) throw new Error('No such checkout session');
+      return { id, url: null, paid: session.paid, amountCents: session.amountCents };
+    },
+  };
+  const paidOpts = { start: false, gateway: stubStripe };
+  const paidList = await listVideos(league.id, alice.id, stubStripe);
+  assert(
+    paidList.access === 'paid' && paidList.canCreate && paidList.priceCents === 350 && !paidList.hasCredit,
+    'pay: with Stripe on, a commissioner off the free list pays $3.50'
+  );
+  await prisma.league.update({ where: { id: league.id }, data: { draftComplete: false } });
+  assert(
+    (await listVideos(league.id, alice.id, stubStripe)).access === 'none',
+    "pay: only for leagues that have drafted (no throwaway leagues just to use the tool)"
+  );
+  await prisma.league.update({ where: { id: league.id }, data: { draftComplete: true } });
+  process.env.VIDEO_PRICE_CENTS = '450';
+  const priceSet = videoPriceCents();
+  process.env.VIDEO_PRICE_CENTS = '10';
+  const priceTooLow = videoPriceCents();
+  delete process.env.VIDEO_PRICE_CENTS;
+  assert(priceSet === 450 && priceTooLow === 350, 'pay: VIDEO_PRICE_CENTS sets the price; under Stripe\'s 50 cent minimum falls back to $3.50');
+
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo(), paidOpts), 'pay: no video without paying', 'Pay for the video first');
+  const checkout = await startCheckout(league.id, alice.id, stubStripe);
+  const paymentRow = await prisma.videoPayment.findFirst({ where: { leagueId: league.id, userId: alice.id } });
+  assert(
+    !!checkout.checkoutUrl?.includes(encodeURIComponent(`/league/${league.id}?video_paid={CHECKOUT_SESSION_ID}`)) &&
+      !checkout.hasCredit && paymentRow?.amountCents === 350 && paymentRow.paidAt === null,
+    'pay: checkout opens a $3.50 Stripe page that returns to the league'
+  );
+  assert(
+    (await confirmPayment(league.id, alice.id, 'cs_smoke_1', stubStripe)).paid === false,
+    'pay: coming back without paying is not a payment'
+  );
+  await expectThrow(() => confirmPayment(league.id, bob.id, 'cs_smoke_1', stubStripe), "pay: nobody can claim someone else's checkout", 'Payment not found');
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo(), paidOpts), 'pay: an unpaid checkout buys nothing', 'Pay for the video first');
+  stripeSessions.get('cs_smoke_1')!.paid = true;
+  assert(
+    (await confirmPayment(league.id, alice.id, 'cs_smoke_1', stubStripe)).paid &&
+      (await listVideos(league.id, alice.id, stubStripe)).hasCredit,
+    'pay: once Stripe says paid, the maker has a credit'
+  );
+  const again = await startCheckout(league.id, alice.id, stubStripe);
+  assert(again.hasCredit && again.checkoutUrl === null && stripeSessions.size === 1, 'pay: with a credit in hand, checkout does not charge again');
+
+  const paidVideo = await createVideo(league.id, alice.id, newVideo(), paidOpts);
+  assert(
+    (await prisma.videoPayment.findFirst({ where: { stripeSessionId: 'cs_smoke_1' } }))?.videoId === paidVideo.id &&
+      !(await listVideos(league.id, alice.id, stubStripe)).hasCredit,
+    'pay: starting the video uses the credit'
+  );
+  await expectThrow(() => createVideo(league.id, alice.id, newVideo(), paidOpts), 'pay: one payment, one video', 'Pay for the video first');
+  await processVideo(paidVideo.id, { photo, setting: 'press', voice: 'Brian', script: paidVideo.script }, stubFal('kling'), stubBrand);
+  assert(
+    (await prisma.leagueVideo.findUnique({ where: { id: paidVideo.id } }))?.status === 'FAILED' &&
+      (await listVideos(league.id, alice.id, stubStripe)).hasCredit,
+    'pay: a video that fails gives the payment back'
+  );
+  const retry = await createVideo(league.id, alice.id, newVideo(), paidOpts);
+  await processVideo(retry.id, { photo, setting: 'press', voice: 'Brian', script: retry.script }, stubFal(), stubBrand);
+  assert(
+    (await prisma.leagueVideo.findUnique({ where: { id: retry.id } }))?.status === 'READY' &&
+      !(await listVideos(league.id, alice.id, stubStripe)).hasCredit && stripeSessions.size === 1,
+    'pay: the retry is free, and a video that works keeps the payment'
+  );
+  // Paid, then closed the tab before coming back: the next visit still finds it
+  await startCheckout(league.id, alice.id, stubStripe);
+  stripeSessions.get('cs_smoke_2')!.paid = true;
+  const afterClosedTab = await createVideo(league.id, alice.id, newVideo(), paidOpts);
+  assert(afterClosedTab.status === 'PROCESSING', 'pay: paying and closing the tab still counts (Stripe is asked again)');
+
+  // ---- "Write it for me": the fact sheet and a stub Claude ----
+  const facts = await buildLeagueFacts(league.id, alice.id);
+  assert(
+    facts.includes('The commissioner (the speaker): Smoke Alice.') &&
+      /1\. Smoke Alice: \d+ points/.test(facts) &&
+      facts.includes('Smoke Bob: turned in a list of 4; dropped') &&
+      facts.includes('(their choice number 3)'),
+    'script: the fact sheet has the speaker, standings and the public swap recap'
+  );
+  assert(
+    !facts.includes('earlier in the order') && !facts.includes('already played') && !facts.includes('dropped in the swap'),
+    "script: nobody's private swap list (their missed lines and why) is in it"
+  );
+  const prompts: string[] = [];
+  const stubClaude = (reply: string): CompleteScript => async (_system, user) => {
+    prompts.push(user);
+    return reply;
+  };
+  const drafted = await draftScript(
+    league.id, alice.id,
+    { notes: '  Bob is my   brother ', setting: 'Locker room' },
+    { complete: stubClaude('"Listen up.\nBob, my own brother, turned in four swaps and it shows. That is all."') }
+  );
+  assert(
+    drafted === 'Listen up. Bob, my own brother, turned in four swaps and it shows. That is all.' &&
+      prompts[0].includes('Bob is my brother') && prompts[0].includes('Setting for the video: Locker room.') &&
+      prompts[0].includes('Fact sheet:'),
+    'script: notes, setting and facts go to the model; quotes and line breaks come off the reply'
+  );
+  const longReply = `${'This sentence is exactly forty chars long. '.repeat(20)}`;
+  const trimmed = cleanScript(longReply);
+  assert(trimmed.length <= 600 && trimmed.endsWith('long.'), `script: an over-long draft is cut at a sentence end under 600 (got ${trimmed.length})`);
+  await expectThrow(
+    () => draftScript(league.id, alice.id, { notes: 'x'.repeat(301) }, { complete: stubClaude('ok') }),
+    'script: notes capped at 300 characters', 'under 300'
+  );
+  const draftDay = Date.now() + 10 * 24 * 3600 * 1000; // a day of its own, so the cap is clean
+  for (let i = 0; i < 10; i++) {
+    await draftScript(league.id, bob.id, {}, { complete: stubClaude('A perfectly fine little script for the league to hear today.'), now: draftDay });
+  }
+  await expectThrow(
+    () => draftScript(league.id, bob.id, {}, { complete: stubClaude('x'), now: draftDay }),
+    'script: 10 drafts a day per person', 'drafts today'
+  );
+  await expectThrow(() => draftVideoScript(league.id, bob.id, {}), 'script: only someone who can make a video can draft one', 'not available');
+  await expectThrow(() => draftVideoScript(league.id, alice.id, {}), 'script: without an Anthropic key the writer is off', 'not set up');
+
+  // Clear these fakes (their URLs don't play) so the league is clean, and
+  // smoke1 isn't at its daily cap, for trying the real thing locally
+  await prisma.videoPayment.deleteMany({ where: { leagueId: league.id } });
+  await prisma.leagueVideo.deleteMany({ where: { leagueId: league.id } });
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  assert(
+    (await prisma.leagueVideo.count({ where: { leagueId: league.id } })) === 0,
+    'video: the smoke league ends with no videos (smoke1 can make real ones locally)'
+  );
 
   // ---------- Password reset by email ----------
   console.log('— Password reset');
