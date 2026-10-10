@@ -1143,7 +1143,7 @@ async function main() {
     'live: games not live (or missing from the scoreboard) are left alone'
   );
 
-  // ---------- Commissioner video messages (fal, Stripe and Claude stubbed: free, offline) ----------
+  // ---------- League video messages, any member (fal, Stripe and Claude stubbed: free, offline) ----------
   console.log('— Video messages');
   const savedEnv = Object.fromEntries(
     ['FAL_KEY', 'VIDEO_CREATORS', 'STRIPE_SECRET_KEY', 'ANTHROPIC_API_KEY', 'VIDEO_PRICE_CENTS'].map((k) => [k, process.env[k]])
@@ -1158,16 +1158,16 @@ async function main() {
     photo, setting: 'press', voice: 'Brian', script: 'Week six is here. Set your swap lists, cowards.', consent: true, ...extra,
   });
   assert(
-    !(await listVideos(league.id, alice.id)).canCreate,
-    'video: with no Stripe key, a commissioner off the free list cannot make one'
+    !(await listVideos(league.id, alice.id)).canCreate && !(await listVideos(league.id, bob.id)).canCreate,
+    'video: with no Stripe key, nobody off the free list can make one'
   );
   process.env.VIDEO_CREATORS = ' Smoke1@Test.Local , other@test.local';
   const freeList = await listVideos(league.id, alice.id);
   assert(
     freeList.canCreate && freeList.access === 'free' && !(await listVideos(league.id, bob.id)).canCreate,
-    'video: a commissioner on the free list can (any case), a member cannot'
+    'video: the free list is by login email (any case), nobody else rides on it'
   );
-  await expectThrow(() => createVideo(league.id, bob.id, newVideo(), { start: false }), 'video: a member cannot start one', 'not available');
+  await expectThrow(() => createVideo(league.id, bob.id, newVideo(), { start: false }), 'video: off the free list with no Stripe, no video', 'not available');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ consent: false }), { start: false }), 'video: own-face consent required', 'photo is of you');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ photo: 'https://example.com/me.jpg' }), { start: false }), 'video: photo must be an uploaded image', 'Add a photo');
   await expectThrow(() => createVideo(league.id, alice.id, newVideo({ setting: 'moon' }), { start: false }), 'video: unknown setting rejected', 'Pick a setting');
@@ -1238,7 +1238,7 @@ async function main() {
   const bobVideosBefore = await listVideos(league.id, bob.id);
   const aliceList = await listVideos(league.id, alice.id);
   assert(bobVideosBefore.videos.length === 0 && aliceList.videos.length === 4, "video: unsent videos are only their maker's");
-  await expectThrow(() => sendVideo(league.id, readyVideo.id, bob.id), 'video: a member cannot send', 'Only the commissioner');
+  await expectThrow(() => sendVideo(league.id, readyVideo.id, bob.id), "video: nobody can send someone else's video", 'Video not found');
   await expectThrow(() => sendVideo(league.id, failedVideo.id, alice.id), 'video: a failed video cannot be sent', 'not ready');
   outbox.length = 0;
   const sent = await sendVideo(league.id, readyVideo.id, alice.id);
@@ -1246,7 +1246,7 @@ async function main() {
     sent.sentTo === 2 &&
       outbox.map((e) => e.to).sort().join() === 'smoke2@test.local,smoke3@test.local' &&
       outbox[0].text.includes(`/league/${league.id}?video=${readyVideo.id}`) &&
-      outbox[0].text.includes('AI-generated'),
+      outbox[0].text.includes('AI-generated') && outbox[0].text.includes('Video from the commish'),
     'video: one tap emails every other member a link, labeled AI-generated'
   );
   await expectThrow(() => sendVideo(league.id, readyVideo.id, alice.id), 'video: sends once', 'Already sent');
@@ -1255,6 +1255,26 @@ async function main() {
     bobVideosAfter.videos.length === 1 && bobVideosAfter.videos[0].videoUrl === 'https://fal.media/final-with-logo.mp4' && !bobVideosAfter.videos[0].mine,
     'video: once sent, every member sees it'
   );
+
+  // Any member, not just the commissioner (Oct 10): Bob is a plain member
+  process.env.VIDEO_CREATORS = 'smoke2@test.local';
+  const bobAccess = await listVideos(league.id, bob.id);
+  const bobVideo = await createVideo(league.id, bob.id, newVideo({ script: 'Alice runs this league like she drafts. Badly.' }), { start: false });
+  await processVideo(bobVideo.id, { photo, setting: 'press', voice: 'Brian', script: bobVideo.script }, stubFal(), stubBrand);
+  outbox.length = 0;
+  const bobSent = await sendVideo(league.id, bobVideo.id, bob.id);
+  assert(
+    bobAccess.canCreate && bobAccess.access === 'free' && bobSent.sentTo === 2 &&
+      outbox.map((e) => e.to).sort().join() === 'smoke1@test.local,smoke3@test.local' &&
+      outbox[0].text.includes('Video from Smoke Bob') && !outbox[0].text.includes('commish'),
+    'video: a member who is not the commissioner can make and send one, under their own name'
+  );
+  const aliceSees = (await listVideos(league.id, alice.id)).videos.filter((v) => v.sentAt);
+  assert(
+    aliceSees.length === 2 && aliceSees[0].id === bobVideo.id && aliceSees[0].maker.name === 'Smoke Bob' && !aliceSees[0].mine,
+    "video: the league sees every maker's sent videos, newest first"
+  );
+  process.env.VIDEO_CREATORS = ' Smoke1@Test.Local , other@test.local';
 
   const interrupted = await createVideo(league.id, alice.id, newVideo(), { start: false });
   await failInterruptedVideos();
@@ -1283,8 +1303,9 @@ async function main() {
   const paidOpts = { start: false, gateway: stubStripe };
   const paidList = await listVideos(league.id, alice.id, stubStripe);
   assert(
-    paidList.access === 'paid' && paidList.canCreate && paidList.priceCents === 350 && !paidList.hasCredit,
-    'pay: with Stripe on, a commissioner off the free list pays $3.50'
+    paidList.access === 'paid' && paidList.canCreate && paidList.priceCents === 350 && !paidList.hasCredit &&
+      (await listVideos(league.id, bob.id, stubStripe)).access === 'paid',
+    'pay: with Stripe on, every member off the free list pays $3.50, commissioner or not'
   );
   await prisma.league.update({ where: { id: league.id }, data: { draftComplete: false } });
   assert(
@@ -1321,6 +1342,7 @@ async function main() {
   );
   const again = await startCheckout(league.id, alice.id, stubStripe);
   assert(again.hasCredit && again.checkoutUrl === null && stripeSessions.size === 1, 'pay: with a credit in hand, checkout does not charge again');
+  await expectThrow(() => createVideo(league.id, bob.id, newVideo(), paidOpts), "pay: one member's payment is not another's credit", 'Pay for the video first');
 
   const paidVideo = await createVideo(league.id, alice.id, newVideo(), paidOpts);
   assert(
@@ -1351,7 +1373,7 @@ async function main() {
   // ---- "Write it for me": the fact sheet and a stub Claude ----
   const facts = await buildLeagueFacts(league.id, alice.id);
   assert(
-    facts.includes('The commissioner (the speaker): Smoke Alice.') &&
+    facts.includes("The speaker: Smoke Alice, who is the league's commissioner.") &&
       /1\. Smoke Alice: \d+ points/.test(facts) &&
       facts.includes('Smoke Bob: turned in a list of 4; dropped') &&
       facts.includes('(their choice number 3)'),
@@ -1392,8 +1414,16 @@ async function main() {
     () => draftScript(league.id, bob.id, {}, { complete: stubClaude('x'), now: draftDay }),
     'script: 10 drafts a day per person', 'drafts today'
   );
+  assert(
+    (await buildLeagueFacts(league.id, bob.id)).includes(
+      'The speaker: Smoke Bob, a player in the league (not its commissioner). The commissioner is Smoke Alice.'
+    ),
+    'script: for a member, the fact sheet says who is speaking and who the commissioner is'
+  );
+  delete process.env.STRIPE_SECRET_KEY;
   await expectThrow(() => draftVideoScript(league.id, bob.id, {}), 'script: only someone who can make a video can draft one', 'not available');
-  await expectThrow(() => draftVideoScript(league.id, alice.id, {}), 'script: without an Anthropic key the writer is off', 'not set up');
+  process.env.STRIPE_SECRET_KEY = 'sk_test_smoke';
+  await expectThrow(() => draftVideoScript(league.id, bob.id, {}), 'script: without an Anthropic key the writer is off', 'not set up');
 
   // Clear these fakes (their URLs don't play) so the league is clean, and
   // smoke1 isn't at its daily cap, for trying the real thing locally

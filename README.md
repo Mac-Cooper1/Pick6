@@ -49,7 +49,7 @@ Smaller spreads and pick'ems score as regular results.
 - **Effective-week rosters**: scoring always uses the roster that was active during that week — the week-6 swap can never rewrite history
 - **Matchup board**: each rostered team's upcoming opponent, kickoff, and spread (read from the DB — the exact line scoring will use) with AP rank badges
 - **Commissioner tools**: schedule the draft, "Sync now", manual game-result override, member password reset (a fallback now that members can reset by email)
-- **Commissioner video messages**: in Settings, a commissioner turns their own photo, a setting (press conference, locker room, sideline, tailgate, TV studio, or as is), a voice and a script into an AI talking video with the Pick 6 logo in the corner, then emails it to the whole league in one tap; a banner on the league page plays it for everyone. **Write it for me** has Claude draft the script from the league's own season (standings, rosters, the public swap recap). **$3.50 a video** through Stripe Checkout for commissioners of drafted leagues; free for the emails in `VIDEO_CREATORS`. Made on fal.ai (nano-banana edit, ElevenLabs, Kling AI Avatar v2; a real 38-second video cost $2.21 and took 10 minutes)
+- **Video messages**: in Settings, any league member turns their own photo, a setting (press conference, locker room, sideline, tailgate, TV studio, or as is), a voice and a script into an AI talking video with the Pick 6 logo in the corner, then emails it to the whole league in one tap; a banner on the league page plays it for everyone, with a "Make your own" link under the player. **Write it for me** has Claude draft the script from the league's own season (standings, rosters, the public swap recap). **$3.50 a video** through Stripe Checkout for members of drafted leagues; free for the emails in `VIDEO_CREATORS`. Made on fal.ai (nano-banana edit, ElevenLabs, Kling AI Avatar v2; a real 38-second video cost $2.21 and took 10 minutes)
 - **DB-enforced integrity**: partial unique indexes guarantee one owner per team and one team per slot
 
 ## Tech Stack
@@ -105,8 +105,8 @@ npm --prefix server run lint && npm --prefix client run lint
 | `ADMIN_SECRET` | prod | shared secret for scheduled syncs (`openssl rand -hex 24`) |
 | `ODDS_API_KEY` | recommended | [the-odds-api.com](https://the-odds-api.com/) — without it, no upset detection |
 | `CORS_ORIGIN` | prod | exact client origin |
-| `FAL_KEY` | for videos | [fal.ai](https://fal.ai/) API key for the commissioner video messages (pay per use). Unset: the video maker stays hidden |
-| `VIDEO_CREATORS` | for videos | comma-separated login emails who make videos **for free** (they must commission the league); every such video is paid from the fal account |
+| `FAL_KEY` | for videos | [fal.ai](https://fal.ai/) API key for the league video messages (pay per use). Unset: the video maker stays hidden |
+| `VIDEO_CREATORS` | for videos | comma-separated login emails who make videos **for free** (in any league they play in); every such video is paid from the fal account |
 | `STRIPE_SECRET_KEY` | for paid videos | Stripe secret key (`sk_test_...` locally, live on Render; a restricted key with Checkout Sessions write is enough). Unset: only the free list can make videos. `VIDEO_PRICE_CENTS` sets the price (default 350 = $3.50) |
 | `ANTHROPIC_API_KEY` | for script drafts | Claude writes the first draft of a video script. Unset: the button is hidden. `VIDEO_SCRIPT_MODEL` picks the model (default `claude-haiku-5-5`) |
 | `RESEND_API_KEY` | prod | [resend.com](https://resend.com/) key with Sending access for `pick6cfb.com`. Unset on a dev machine: emails print to the server log instead, reset links included. Unset in production: an error is logged and nothing is sent (the link never reaches Render's logs) |
@@ -158,7 +158,7 @@ pick6/
 │   │                      # week-6 swap, matchups, team card, teamMatcher, cache,
 │   │                      # auth (lookups + password reset), email (Resend),
 │   │                      # fal, video, videoBrand (logo stamp), scriptWriter (Claude),
-│   │                      # stripeClient (commissioner video messages)
+│   │                      # stripeClient (league video messages)
 │   ├── socket/            # live draft room
 │   ├── middleware/        # JWT auth, admin gate, error handler
 │   └── lib/, utils/, types/
@@ -192,6 +192,14 @@ Source-available, not open source: see [LICENSE.md](LICENSE.md). You're welcome 
 - **Week-5 swap live (WS8)**: window auto-opens after week 5 from the scheduled sync; worst-record-first turns on a 24h clock (lazy expiry), pass-and-swap-later free phase, same-slot + availability + "game already started" guards; swap UI in Draft Recap, commissioner open/close in Settings
 - **Deploy pre-staged (WS9 prep)**: `render.yaml` blueprint (API + Postgres, auto-generated secrets, migrate-on-deploy), CORS `credentials` flag removed (Bearer auth needs none)
 - **Verified live**: real 104-game Week 1 slate synced, spreads attached to 101 games, 52 FCS stubs auto-created, league rescored; smoke suite now **43 assertions**, all green
+
+**Oct 10, 2026 (later)** — Video messages for every member, not just commissioners (Mac, right after merging PR #32: "I don't know why we are limiting it to just commissioners. Why can't everyone generate a video?"):
+- **Why it was limited**: the feature started as "a message from the commissioner", and while it was free the commissioner rule kept other people from spending Mac's fal credit. Now that everyone off the free list pays $3.50, more makers means more revenue, not more cost, so the rule had no job left.
+- **What changed**: `videoService` no longer checks the role, for making or for sending (you can only send your own). Paying is unchanged: free for `VIDEO_CREATORS` emails, $3.50 through Stripe for any other member of a drafted league, each person's payment is their own credit. The Settings card shows for every member (the amber "Commissioner" label is gone). The email says "Video from the commish" for a commissioner and "Video from {name}" for anyone else.
+- **Write it for me** knows who is talking: the fact sheet names the speaker, says whether they're the commissioner, and names the commissioner otherwise (who is now fair game). A real Haiku draft as a plain member opened "I'm Smoke Bob, not the commissioner, so the standings are not my fault."
+- **Several makers in one league**: the banner shows the newest video you haven't watched, so closing one brings up the next (it only ever showed the single newest). The player has a **Make your own** button for anyone who can make one: it opens Settings at the video card. Members rarely open Settings, so this is how they find it.
+- **What opens up with it** (parked in NOTES.md): any member can now email the league a video, so a commissioner "take this down" control and a watch on Resend's 100-a-day limit matter more than they did.
+- Verified: smoke test **180/180** (4 new: a member makes and sends one under their own name, the league sees every maker's videos, one member's payment isn't another's credit, the member fact sheet). In headless Chrome at phone size as a plain member against the real local server: the card with "Pay $3.50 and make my video", two banners in turn, the player, and Make your own landing on the card. No migration.
 
 **Oct 10, 2026** — Commissioner videos: AI script drafts, the Pick 6 logo, and $3.50 through Stripe (Mac, after his first real video: "I had to ask for a summary... add a logo... I can't be the one fronting this"):
 - **The first real video worked**: 594 characters, 37.6 seconds, 960x960, **$2.21** of fal credit and **10.1 minutes** to make (the app said "2 to 5 minutes"; it now says about 10).
