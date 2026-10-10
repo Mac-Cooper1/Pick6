@@ -79,12 +79,13 @@ turn — standing instruction from Mac)**.
   escapes everything), `falClient` (Oct 5: fal.ai queue over plain fetch,
   `runFal(modelId, input, { keepForever })`; per-job retention header:
   the finished video never expires, in-between files after a day),
-  `videoService` (commissioner AI video messages, Oct 5; paid Oct 10:
+  `videoService` (AI video messages, Oct 5; paid Oct 10:
   photo → nano-banana edit into a setting → ElevenLabs voice → Kling AI
   Avatar v2 Standard → logo stamp; a real 38s video cost $2.21 and took 10
-  minutes. The maker must commission the league: free for `VIDEO_CREATORS`
+  minutes. **Any league member** can make one (Mac's call Oct 10; it was
+  commissioner-only while it was free): free for `VIDEO_CREATORS`
   emails, $3.50 via Stripe for everyone else once `STRIPE_SECRET_KEY` is set
-  and the league has drafted. A payment (`VideoPayment`) is a credit:
+  and the league has drafted. Only its maker can send a video. A payment (`VideoPayment`) is a credit:
   starting a video claims it, a failed video gives it back. Own-face
   consent box; 5/day; jobs run in-process, so the startup sweep fails any
   left mid-way; fal, the logo stamp and Stripe are all passed in, so the
@@ -205,7 +206,7 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 176 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 180 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
@@ -217,8 +218,8 @@ so the card's end-to-end checks run exactly like an ESPN outage; plus the
 live view from a real game's numbers, both perspectives), and the
 password reset (single use, expiry, rate limit, any-case but
 wildcard-proof lookup, login/reset token separation, HTML escaping; emails
-are captured in memory, nothing sends), and the commissioner video
-messages with fal, the logo stamp, Stripe and Claude all stubbed (free,
+are captured in memory, nothing sends), and the league video
+messages (commissioner and plain member) with fal, the logo stamp, Stripe and Claude all stubbed (free,
 offline; it deletes those fake videos and payments when done, so `smoke1`
 can make real ones locally and isn't at its 5-a-day cap).
 **Trying videos locally**: `FAL_KEY` + `VIDEO_CREATORS=smoke1@test.local`
@@ -472,7 +473,11 @@ a live key on Render from an activated account; Mac's is a restricted
 `rk_live_` key that Stripe confirms can create and read Checkout
 sessions). A real Haiku draft works (9.8s). Local `server/.env` takes the
 sandbox `sk_test_` key only: a live key there charges real cards. Not yet
-run for real: an actual payment. The script Claude wrote by hand
+run for real: an actual payment. Later Oct 10, after PR #32 merged:
+videos opened to every member (no role check; the script writer's fact
+sheet names the speaker and the commissioner; the banner walks through
+unwatched videos; "Make your own" under the player opens Settings at the
+card). The script Claude wrote by hand
 for the Kirven league on Oct 10 used two members' private swap-list lines
 from the DB: the in-app writer never does. Prod puppets
 test1/2/3 now log in as `mac.cooper002+test1/2/3@gmail.com` (their

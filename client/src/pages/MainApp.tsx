@@ -26,12 +26,15 @@ const TABS: { id: Tab; label: string }[] = [
 
 export function MainApp() {
   const { leagueId } = useParams<{ leagueId: string }>();
-  // Coming back from Stripe Checkout (a commissioner's video) lands on
+  // Coming back from Stripe Checkout (paying for a video) lands on
   // Settings, where the video maker picks the payment up
   const [params] = useSearchParams();
   const [activeTab, setActiveTab] = useState<Tab>(() =>
     params.get('video_paid') || params.get('video_canceled') ? 'settings' : 'leaderboard'
   );
+  // "Make your own" under a league video opens Settings at the video maker.
+  // A count, not a flag, so every tap scrolls there (0 = plain Settings).
+  const [videoMakerTaps, setVideoMakerTaps] = useState(0);
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
 
   const leagueIdNum = leagueId ? parseInt(leagueId) : NaN;
@@ -66,21 +69,30 @@ export function MainApp() {
         tabRef={(id, el) => {
           tabRefs.current[id] = el;
         }}
-        onSettings={() => setActiveTab('settings')}
+        onSettings={() => {
+          setVideoMakerTaps(0);
+          setActiveTab('settings');
+        }}
         settingsActive={activeTab === 'settings'}
       />
 
       {/* Tab Content */}
       <main className="max-w-6xl mx-auto">
-        {/* The commissioner's latest video message, until watched */}
-        <LeagueVideoBanner leagueId={leagueIdNum} />
+        {/* The league's latest video message, until watched */}
+        <LeagueVideoBanner
+          leagueId={leagueIdNum}
+          onMakeOwn={() => {
+            setVideoMakerTaps((n) => n + 1);
+            setActiveTab('settings');
+          }}
+        />
         {activeTab === 'leaderboard' && <LeaderboardTab leagueId={leagueIdNum} />}
         {activeTab === 'myteam' && <MyTeamTab leagueId={leagueIdNum} />}
         {activeTab === 'weeks' && <WeekByWeekTab leagueId={leagueIdNum} />}
         {activeTab === 'league' && <LeagueTab leagueId={leagueIdNum} />}
         {activeTab === 'draft' && <DraftTab leagueId={leagueIdNum} />}
         {activeTab === 'swap' && <SwapTab leagueId={leagueIdNum} />}
-        {activeTab === 'settings' && <SettingsTab leagueId={leagueIdNum} />}
+        {activeTab === 'settings' && <SettingsTab leagueId={leagueIdNum} scrollToVideo={videoMakerTaps} />}
       </main>
     </div>
   );

@@ -17,7 +17,7 @@ function leagueIdOf(req: AuthRequest): number {
 }
 
 /**
- * Commissioner video messages: the league's sent videos, your own drafts,
+ * League video messages: the league's sent videos, your own drafts,
  * and the options for making one
  * GET /api/leagues/:leagueId/videos
  */
@@ -53,8 +53,8 @@ export async function confirmPaymentEndpoint(req: AuthRequest, res: Response) {
 }
 
 /**
- * Start a video (the league's commissioner: free for VIDEO_CREATORS, a paid
- * credit for everyone else). Returns PROCESSING; it's ready in about ten
+ * Start a video (any member: free for VIDEO_CREATORS, a paid credit for
+ * everyone else). Returns PROCESSING; it's ready in about ten
  * minutes.
  * POST /api/leagues/:leagueId/videos
  * Body: { photo: data URL, setting, voice, script, consent: true }

@@ -105,10 +105,19 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
   `lastPlay.text` would be a one-line "last play" (Mac said no play log).
   The My Team tiles could show the same live score with no extra ESPN
   calls (same cached week scoreboard).
-- **Commissioner videos, what's left (Oct 10: script drafts, the logo and
-  $3.50 Stripe checkout shipped).**
+- **Video messages, what's left (Oct 10: script drafts, the logo,
+  $3.50 Stripe checkout, and any member can make one).**
+  - **Take a video down.** Since Oct 10 any member can email the league a
+    video, and nobody can remove one: not its maker, not the commissioner.
+    A "Remove" for the maker and the commissioner (hide it from the banner
+    and the email link) is the first thing to build if a video ever lands
+    badly. Until then: Mac can clear `sentAt` by hand.
+  - **Email volume.** One send is an email to every other member, from the
+    same Resend account as password resets (free: 100 a day). About ten
+    sends in a day in 10-person leagues would use it up. Each of those is
+    a $3.50 sale, so the answer is Resend's paid plan, but watch for it.
   - **Script and photo checks before strangers use it at scale.** Today
-    the guards are: commissioner of a drafted league, a card on file, the
+    the guards are: member of a drafted league, a card on file, the
     own-face checkbox, and the providers' filters. A check on the script
     (the Claude call is already there) and on the photo is the next step
     if this ever gets real traffic.

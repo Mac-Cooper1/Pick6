@@ -1,10 +1,11 @@
 /**
- * Commissioner video messages (Oct 5; paid since Oct 10). In Settings the
- * commissioner makes an AI talking video of themselves (photo, setting,
- * voice, and a script they write or have AI draft); once it's ready, one
- * tap emails it to the league, and a banner on the league page plays it for
- * everyone. Free for the host's list; everyone else pays per video through
- * Stripe Checkout (off to Stripe and back, the form kept in sessionStorage).
+ * League video messages (Oct 5; paid since Oct 10; any member since Oct 10).
+ * In Settings a member makes an AI talking video of themselves (photo,
+ * setting, voice, and a script they write or have AI draft); once it's
+ * ready, one tap emails it to the league, and a banner on the league page
+ * plays it for everyone (with a "Make your own" link under the player).
+ * Free for the host's list; everyone else pays per video through Stripe
+ * Checkout (off to Stripe and back, the form kept in sessionStorage).
  * The server makes the video on fal.ai in about ten minutes; this file only
  * ever sees the result.
  */
@@ -69,7 +70,7 @@ function firstName(name: string): string {
   return name.split(' ')[0];
 }
 
-// ---------- Settings: make one (allowlisted commissioners only) ----------
+// ---------- Settings: make one (any member the server says can) ----------
 
 function MyVideo({ video, onSend, sending }: { video: LeagueVideo; onSend: () => void; sending: boolean }) {
   return (
@@ -148,7 +149,7 @@ function formatPrice(cents: number): string {
   return `$${(cents / 100).toFixed(2).replace(/\.00$/, '')}`;
 }
 
-export function VideoComposer({ leagueId }: { leagueId: number }) {
+export function VideoComposer({ leagueId, scrollTo = 0 }: { leagueId: number; scrollTo?: number }) {
   const queryClient = useQueryClient();
   const { data } = useLeagueVideos(leagueId);
   const [params, setParams] = useSearchParams();
@@ -248,12 +249,13 @@ export function VideoComposer({ leagueId }: { leagueId: number }) {
     })();
   }, [paidSession, canceled, params, setParams, leagueId, queryClient]);
 
-  // After a round trip to Stripe, bring the card back into view
+  // After a round trip to Stripe, or "Make your own" under someone's video,
+  // bring the card into view
   const cameBack = handledReturn.current !== null;
   const loaded = Boolean(data?.canCreate);
   useEffect(() => {
-    if (cameBack && loaded) cardRef.current?.scrollIntoView({ block: 'start' });
-  }, [cameBack, loaded]);
+    if ((cameBack || scrollTo > 0) && loaded) cardRef.current?.scrollIntoView({ block: 'start' });
+  }, [cameBack, scrollTo, loaded]);
 
   if (!data?.canCreate) return null;
 
@@ -266,10 +268,7 @@ export function VideoComposer({ leagueId }: { leagueId: number }) {
 
   return (
     <div ref={cardRef} className="card p-4 sm:p-6 mb-4 sm:mb-6 scroll-mt-4">
-      <div className="flex items-center gap-3 mb-2">
-        <span className="label text-amber-700">Commissioner</span>
-        <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900">Video message</h3>
-      </div>
+      <h3 className="font-display font-bold uppercase tracking-wide text-xl text-gray-900 mb-2">Video message</h3>
       <p className="text-sm text-gray-600 mb-4">
         Make an AI video of yourself reading your own script, then send it to the whole league in one tap.
         It takes about 10 minutes to make.
@@ -453,7 +452,15 @@ function markSeen(id: number) {
   }
 }
 
-export function VideoPlayerModal({ video, onClose }: { video: LeagueVideo; onClose: () => void }) {
+export function VideoPlayerModal({
+  video,
+  onClose,
+  onMakeOwn,
+}: {
+  video: LeagueVideo;
+  onClose: () => void;
+  onMakeOwn?: () => void; // set when the viewer can make one too
+}) {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -500,6 +507,14 @@ export function VideoPlayerModal({ video, onClose }: { video: LeagueVideo; onClo
           <video src={video.videoUrl} controls autoPlay playsInline className="w-full max-h-[70vh] bg-black" />
         )}
         <p className="px-4 py-3 text-sm text-gray-600">&ldquo;{video.script}&rdquo;</p>
+        {onMakeOwn && (
+          <div className="px-4 pb-4">
+            <Button variant="outline" size="sm" onClick={onMakeOwn}>
+              <VideoCamera size={18} weight="bold" aria-hidden />
+              Make your own
+            </Button>
+          </div>
+        )}
       </div>
     </div>,
     document.body
@@ -507,11 +522,12 @@ export function VideoPlayerModal({ video, onClose }: { video: LeagueVideo; onClo
 }
 
 /**
- * The newest video sent in the last two weeks, until you've watched it (or
- * closed the banner) on this device. The email's link (?video=ID) opens the
- * player straight away.
+ * The newest video sent in the last two weeks that you haven't watched (or
+ * closed the banner for) on this device: with several makers in a league,
+ * closing one brings up the next. The email's link (?video=ID) opens the
+ * player straight away. onMakeOwn takes the viewer to the maker in Settings.
  */
-export function LeagueVideoBanner({ leagueId }: { leagueId: number }) {
+export function LeagueVideoBanner({ leagueId, onMakeOwn }: { leagueId: number; onMakeOwn?: () => void }) {
   const { data } = useLeagueVideos(leagueId);
   const [params, setParams] = useSearchParams();
   const [playing, setPlaying] = useState<LeagueVideo | null>(null);
@@ -528,7 +544,11 @@ export function LeagueVideoBanner({ leagueId }: { leagueId: number }) {
   }, [linked, data, params, setParams]);
 
   const latest = data?.videos.find(
-    (v) => v.sentAt && v.videoUrl && Date.now() - new Date(v.sentAt).getTime() < BANNER_DAYS * 24 * 3600 * 1000
+    (v) =>
+      v.sentAt &&
+      v.videoUrl &&
+      Date.now() - new Date(v.sentAt).getTime() < BANNER_DAYS * 24 * 3600 * 1000 &&
+      !wasSeen(v.id)
   );
   const close = (id: number) => {
     markSeen(id);
@@ -537,14 +557,14 @@ export function LeagueVideoBanner({ leagueId }: { leagueId: number }) {
 
   return (
     <>
-      {latest && !wasSeen(latest.id) && (
+      {latest && (
         <div className="px-4 sm:px-6 pt-4">
           <div className="card flex items-center gap-3 p-3 sm:p-4 !border-amber-300 !bg-amber-50">
             <Megaphone size={26} weight="fill" className="text-amber-700 shrink-0" aria-hidden />
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-gray-900 leading-tight">New video from {latest.maker.name}</p>
               <p className="text-xs text-gray-600 mt-0.5">
-                AI-generated message from the commissioner
+                AI-generated video message
                 {latest.durationSec ? ` · ${Math.round(latest.durationSec)} seconds` : ''}
               </p>
             </div>
@@ -569,6 +589,15 @@ export function LeagueVideoBanner({ leagueId }: { leagueId: number }) {
             close(playing.id);
             setPlaying(null);
           }}
+          onMakeOwn={
+            data?.canCreate && onMakeOwn
+              ? () => {
+                  close(playing.id);
+                  setPlaying(null);
+                  onMakeOwn();
+                }
+              : undefined
+          }
         />
       )}
     </>

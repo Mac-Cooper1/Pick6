@@ -41,7 +41,7 @@ services:
       - key: RESEND_API_KEY
         sync: false # Resend → API Keys, Sending access for pick6cfb.com; paste in the dashboard
       - key: FAL_KEY
-        sync: false # fal.ai → API Keys; the commissioner video messages (pay per use)
+        sync: false # fal.ai → API Keys; the league video messages (pay per use)
       - key: VIDEO_CREATORS
         sync: false # comma-separated login emails who make videos for free (everyone else pays)
       - key: STRIPE_SECRET_KEY

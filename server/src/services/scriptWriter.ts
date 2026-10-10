@@ -1,20 +1,23 @@
 /**
- * "Write it for me" for the commissioner videos (Oct 10): Claude drafts a
- * roast-style script from the league's own season.
+ * "Write it for me" for the league videos (Oct 10): Claude drafts a
+ * roast-style script from the league's own season, in the voice of whoever
+ * is making the video (any member; the fact sheet says if they're the
+ * commissioner).
  *
  * The fact sheet holds only what every member can already see in the app:
  * standings, weekly points, draft positions, current rosters with each
  * team's results, and the public swap recap (who swapped what, which choice
  * it was, how long each list was). Swap lists stay private: it reads the
  * same getSwapState view the Week 6 Swap tab shows, never the claims table.
- * The commissioner can add a note for what the data can't know ("James is
- * my brother").
+ * The maker can add a note for what the data can't know ("James is my
+ * brother").
  *
  * One Claude call through the official SDK. The draft is a starting point:
- * it lands in the script box, where the commissioner edits it.
+ * it lands in the script box, where the maker edits it.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { MemberRole } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { AppError } from '../middleware/errorHandler';
 import { errorMessage } from '../utils/errors';
@@ -39,16 +42,16 @@ const SERVER_FALLBACK_MODELS = /^claude-(opus-5|fable-5-1|sonnet-5-5)/;
 // The model call, swappable so the smoke test runs without a key
 export type CompleteScript = (system: string, user: string) => Promise<string>;
 
-const SYSTEM_PROMPT = `You write short scripts that the commissioner of a friends' college football pick'em league reads on camera to the league. It becomes an AI talking-head video, played for laughs among friends who all know each other.
+const SYSTEM_PROMPT = `You write short scripts that a member of a friends' college football pick'em league reads on camera to the rest of the league. It becomes an AI talking-head video, played for laughs among friends who all know each other. The fact sheet names the speaker and says whether they are the league's commissioner.
 
-Write one script in the commissioner's own voice (first person).
+Write one script in the speaker's own voice (first person). Only speak as the commissioner if the fact sheet says the speaker is the commissioner.
 
 Hard limits:
 - 430 to 560 characters in total, counting spaces. The video tool rejects anything over 600, so stay under.
-- Use only what is in the fact sheet and the commissioner's notes. Never invent a result, a number, a nickname or a relationship.
+- Use only what is in the fact sheet and the speaker's notes. Never invent a result, a number, a nickname or a relationship.
 
 What makes it good:
-- A friendly roast. Tease three to five people by first name about what they actually did this season: drafted first and sits fifth, turned in no swap list, dropped a team that was winning. The leader, last place and the commissioner's own standing are usually worth a line, and the commissioner should take a shot at themselves.
+- A friendly roast. Tease three to five people by first name about what they actually did this season: drafted first and sits fifth, turned in no swap list, dropped a team that was winning. The leader, last place and the speaker's own standing are usually worth a line, and the speaker should take a shot at themselves. When the speaker is not the commissioner, the commissioner is fair game too.
 - Jokes land on football decisions only. Nothing about anyone's looks, body, health, money, job, family troubles, religion, race, gender or sexuality. Nothing sexual, no slurs, no threats, nothing crueler than friends would say to each other's faces.
 - If the notes mention how people are related or an inside joke, use it.
 
@@ -77,6 +80,7 @@ export async function buildLeagueFacts(leagueId: number, userId: number): Promis
     getCurrentWeek(league.seasonYear),
   ]);
   const speaker = standings.find((s) => s.member.userId === userId);
+  const commissioner = standings.find((s) => s.member.role === MemberRole.COMMISSIONER);
   const scoringWeeks = await loadScoringWeekMap(
     league.seasonYear,
     rosters.flatMap((r) => r.roster.map((t) => t.teamId))
@@ -85,7 +89,10 @@ export async function buildLeagueFacts(leagueId: number, userId: number): Promis
   const lines: string[] = [
     `League: ${league.name} (${standings.length} players), ${league.seasonYear} season, week ${currentWeek}.`,
     'Scoring per team per week: +1 for a win, +2 for a win as an underdog of 3.5 or more, 0 for a loss, -1 for a loss as a favorite of 3.5 or more.',
-    `The commissioner (the speaker): ${speaker?.member.user.name ?? 'unknown'}.`,
+    speaker && speaker === commissioner
+      ? `The speaker: ${speaker.member.user.name}, who is the league's commissioner.`
+      : `The speaker: ${speaker?.member.user.name ?? 'unknown'}, a player in the league (not its commissioner).` +
+        (commissioner ? ` The commissioner is ${commissioner.member.user.name}.` : ''),
     '',
     'Standings (place, name, total points, points week by week, draft position):',
   ];
@@ -207,7 +214,7 @@ export function cleanScript(raw: string): string {
 
 const draftsByUser = new Map<number, number[]>();
 
-/** A draft costs the host money and is free to the commissioner: cap it per day */
+/** A draft costs the host money and is free to the maker: cap it per day */
 function takeDraftSlot(userId: number, now: number): boolean {
   const recent = (draftsByUser.get(userId) ?? []).filter((t) => now - t < 24 * 3600 * 1000);
   if (recent.length >= DRAFTS_PER_DAY) {
@@ -236,7 +243,7 @@ export async function draftScript(
   const setting = typeof input.setting === 'string' && input.setting ? input.setting : 'Press conference';
   const user = [
     `Setting for the video: ${setting}.`,
-    notes ? `The commissioner's notes (true; work them in): ${notes}` : "The commissioner left no notes.",
+    notes ? `The speaker's notes (true; work them in): ${notes}` : 'The speaker left no notes.',
     '',
     'Fact sheet:',
     facts,

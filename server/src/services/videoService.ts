@@ -1,9 +1,9 @@
 /**
- * Commissioner video messages (Oct 5; paid since Oct 10). A commissioner
- * uploads a photo of themselves, picks a setting and a voice and writes a
- * script (or has Claude draft one, scriptWriter); fal.ai makes a talking
- * video, the Pick 6 logo is stamped on (videoBrand), and one tap emails it
- * to the league.
+ * League video messages (Oct 5; paid since Oct 10; any member since Oct 10,
+ * they were the commissioner's alone before). A member uploads a photo of
+ * themselves, picks a setting and a voice and writes a script (or has Claude
+ * draft one, scriptWriter); fal.ai makes a talking video, the Pick 6 logo is
+ * stamped on (videoBrand), and one tap emails it to the league.
  *
  * Three fal jobs (pay per use; a real 38-second video cost $2.21 and took
  * 10 minutes):
@@ -12,7 +12,7 @@
  *  3. video: Kling AI Avatar v2 animates the photo to the voice
  * Only the finished video's URL is stored; the photo never is.
  *
- * Who can make one (they must commission the league, and FAL_KEY must be set):
+ * Who can make one (any member of the league, once FAL_KEY is set):
  *  - free: login emails in VIDEO_CREATORS (Mac, whoever he's treating)
  *  - paid: everyone else, once STRIPE_SECRET_KEY is set and their league has
  *    drafted (a real league, not a throwaway made to use the tool). $3.50
@@ -88,7 +88,7 @@ export interface NewVideo {
   script: string;
 }
 
-/** Emails allowed to make videos while it's a prototype (Mac pays for each one) */
+/** Emails that make videos for free (Mac pays for each one) */
 function creatorEmails(): Set<string> {
   return new Set(
     (process.env.VIDEO_CREATORS ?? '')
@@ -109,11 +109,11 @@ async function membership(leagueId: number, userId: number) {
 
 export type VideoAccess = 'free' | 'paid' | 'none';
 
-/** Free for the VIDEO_CREATORS list; paid for other commissioners of drafted leagues */
+/** Free for the VIDEO_CREATORS list; paid for every other member of a drafted league */
 async function accessFor(leagueId: number, userId: number) {
   const member = await membership(leagueId, userId);
   let access: VideoAccess = 'none';
-  if (isFalConfigured() && member.role === MemberRole.COMMISSIONER) {
+  if (isFalConfigured()) {
     if (creatorEmails().has(member.user.email.toLowerCase())) access = 'free';
     else if (isStripeConfigured() && member.league.draftComplete) access = 'paid';
   }
@@ -491,12 +491,9 @@ export async function failInterruptedVideos(): Promise<number> {
   return ids.length;
 }
 
-/** One tap: email the video to every other member. A video goes out once. */
+/** One tap: its maker emails the video to every other member. A video goes out once. */
 export async function sendVideo(leagueId: number, videoId: number, userId: number): Promise<{ sentTo: number }> {
   const member = await membership(leagueId, userId);
-  if (member.role !== MemberRole.COMMISSIONER) {
-    throw new AppError('Only the commissioner can send video messages', 403);
-  }
   const video = await prisma.leagueVideo.findFirst({ where: { id: videoId, leagueId, createdById: userId } });
   if (!video) throw new AppError('Video not found', 404);
   if (video.status !== LeagueVideoStatus.READY) throw new AppError('That video is not ready yet', 409);
@@ -516,7 +513,7 @@ export async function sendVideo(leagueId: number, videoId: number, userId: numbe
   const seconds = video.durationSec ? ` (${Math.round(video.durationSec)} seconds)` : '';
   const { html, text } = renderEmail({
     preheader: `${maker} made the league a video${seconds}.`,
-    heading: 'Video from the commish',
+    heading: member.role === MemberRole.COMMISSIONER ? 'Video from the commish' : `Video from ${maker}`,
     paragraphs: [
       `${maker} sent ${league} a video message${seconds}.`,
       `It's AI-generated: made from ${maker.split(' ')[0]}'s photo, saying a script they wrote.`,
