@@ -116,6 +116,15 @@ export interface ParsedGame {
 }
 
 /**
+ * ESPN lists a game before its teams are known (the Pac-12's week-13 flex
+ * games) with stand-in competitors: team ids "-1" and "-2", all named
+ * "TBD". Real team ids are positive integers.
+ */
+export function isPlaceholderTeamId(espnId: string | null | undefined): boolean {
+  return !/^[1-9]\d*$/.test(espnId ?? '');
+}
+
+/**
  * Fetch scoreboard data for a specific week
  */
 export async function fetchScoreboard(
@@ -406,9 +415,10 @@ const TEAM_CARD_TIMEOUT_MS = 5000;
 
 /** ESPN's team logo, resized by their CDN (the 500px original is ~30KB) */
 export function espnLogoUrl(espnTeamId: string | null | undefined): string | null {
-  return espnTeamId
-    ? `https://a.espncdn.com/combiner/i?img=/i/teamlogos/ncaa/500/${espnTeamId}.png&w=160&h=160`
-    : null;
+  // A "TBD" opponent has no logo
+  return isPlaceholderTeamId(espnTeamId)
+    ? null
+    : `https://a.espncdn.com/combiner/i?img=/i/teamlogos/ncaa/500/${espnTeamId}.png&w=160&h=160`;
 }
 
 /** ESPN's game page (gamecast before kickoff, box score after) */

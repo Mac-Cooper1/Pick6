@@ -7,7 +7,7 @@
 
 import prisma from '../lib/prisma';
 import { ConferenceSlot, GameStatus } from '@prisma/client';
-import { fetchSosRanks, getGamesForWeek, ParsedGame } from './espnClient';
+import { fetchSosRanks, getGamesForWeek, isPlaceholderTeamId, ParsedGame } from './espnClient';
 import { getNCAAFSpreads, isOddsApiConfigured, ParsedOdds } from './oddsClient';
 import { findTeamByEspnId, matchGameToOdds, wasUpset } from './teamMatcher';
 import {
@@ -16,6 +16,7 @@ import {
   loadScoringWeekMap,
   pointsForTeam,
 } from './scoringWeekService';
+import { isSeasonOver } from './seasonService';
 import { runDueSwaps, SwapRunResult } from './swapService';
 import { errorMessage } from '../utils/errors';
 
@@ -63,15 +64,54 @@ export async function syncWeekGames(
   seasonYear: number,
   weekNumber: number
 ): Promise<{ games: ParsedGame[]; errors: string[] }> {
-  const errors: string[] = [];
-
   console.log(`[Sync] Fetching games for ${seasonYear} week ${weekNumber}`);
   const espnGames = await getGamesForWeek(seasonYear, weekNumber);
   console.log(`[Sync] Found ${espnGames.length} games from ESPN`);
 
+  return saveWeekGames(seasonYear, weekNumber, espnGames);
+}
+
+/**
+ * Store one week's ESPN games as Game rows. Two kinds never get a row:
+ *
+ *  - anything after the season's final week (2026: the title games of week
+ *    14 and Army-Navy in week 15). No row means nothing downstream can
+ *    score or show it, whichever endpoint asked for the sync;
+ *  - games ESPN lists before it knows the teams ("TBD at Colorado State":
+ *    the Pac-12's week-13 flex games). They wait until both teams are real.
+ *
+ * A stored row follows ESPN if its teams change, and drops its line when
+ * they do: a line belongs to a matchup, not an event id.
+ */
+export async function saveWeekGames(
+  seasonYear: number,
+  weekNumber: number,
+  espnGames: ParsedGame[]
+): Promise<{ games: ParsedGame[]; errors: string[] }> {
+  const errors: string[] = [];
   const savedGames: ParsedGame[] = [];
+  let skipped = 0;
+
+  if (weekNumber > (await getLastWeek(seasonYear))) {
+    console.log(`[Sync] Week ${weekNumber} is after the season: ${espnGames.length} games not stored`);
+    return { games: savedGames, errors };
+  }
+
+  const storedRows = await prisma.game.findMany({
+    where: { espnEventId: { in: espnGames.map((g) => g.espnEventId) } },
+    select: { espnEventId: true, homeTeamId: true, awayTeamId: true },
+  });
+  const stored = new Map(storedRows.map((g) => [g.espnEventId, g]));
 
   for (const espnGame of espnGames) {
+    if (
+      isPlaceholderTeamId(espnGame.homeTeam.espnId) ||
+      isPlaceholderTeamId(espnGame.awayTeam.espnId)
+    ) {
+      skipped++;
+      continue;
+    }
+
     try {
       // Find teams in our database (creating unslotted stubs for unknown
       // opponents so FBS-vs-FCS games still land and score)
@@ -105,6 +145,10 @@ export async function syncWeekGames(
         }
       }
 
+      const row = stored.get(espnGame.espnEventId);
+      const teamsChanged =
+        row !== undefined && (row.homeTeamId !== homeTeam.id || row.awayTeamId !== awayTeam.id);
+
       // Upsert game
       await prisma.game.upsert({
         where: { espnEventId: espnGame.espnEventId },
@@ -119,6 +163,19 @@ export async function syncWeekGames(
           weekNumber,
           venue: espnGame.venue,
           neutralSite: espnGame.neutralSite,
+          ...(teamsChanged
+            ? {
+                homeTeamId: homeTeam.id,
+                awayTeamId: awayTeam.id,
+                spread: null,
+                homeMoneyline: null,
+                awayMoneyline: null,
+                favoriteTeamId: null,
+                bookmaker: null,
+                oddsTimestamp: null,
+                wasUpset: false,
+              }
+            : {}),
         },
         create: {
           espnEventId: espnGame.espnEventId,
@@ -142,7 +199,9 @@ export async function syncWeekGames(
     }
   }
 
-  console.log(`[Sync] Saved ${savedGames.length} games, ${errors.length} errors`);
+  console.log(
+    `[Sync] Saved ${savedGames.length} games, ${skipped} waiting on a TBD team, ${errors.length} errors`
+  );
   return { games: savedGames, errors };
 }
 
@@ -249,9 +308,13 @@ export async function syncOdds(
 
 /**
  * Refresh every team's ESPN strength-of-schedule rank (the standings
- * tiebreaker, see standingsService). One ESPN call, no quota.
+ * tiebreaker, see standingsService). One ESPN call, no quota. Once the
+ * season is over the stored ranks are final: ESPN keeps moving them through
+ * the bowls, which would reorder a tie on the final leaderboard in January.
  */
-export async function syncSosRanks(seasonYear: number): Promise<number> {
+export async function syncSosRanks(seasonYear: number, now: Date = new Date()): Promise<number> {
+  if (await isSeasonOver(seasonYear, now)) return 0;
+
   const ranks = await fetchSosRanks(seasonYear);
   const teams = await prisma.team.findMany({
     where: { espnTeamId: { in: [...ranks.keys()] } },

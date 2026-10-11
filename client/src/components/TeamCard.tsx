@@ -120,10 +120,11 @@ type SeasonRow = { kind: 'game'; game: TeamCardGame } | { kind: 'bye'; week: num
 /**
  * The whole season in week order, played and upcoming together, with a bye
  * row for every week the team is off. Byes only fill weeks up to the team's
- * last known game, so a missing ESPN schedule never reads as a run of byes.
+ * last known game of the Pick 6 season, so a missing ESPN schedule never
+ * reads as a run of byes and the gap before Army-Navy isn't a "bye".
  */
 function seasonRows(card: TeamCardData): SeasonRow[] {
-  const lastKnownWeek = Math.max(0, ...card.games.map((g) => g.week));
+  const lastKnownWeek = Math.max(0, ...card.games.filter((g) => !g.afterSeason).map((g) => g.week));
   const weeks = new Set(card.games.map((g) => g.week));
   for (let week = 1; week <= lastKnownWeek; week++) weeks.add(week);
 
@@ -203,8 +204,11 @@ function opponentLabel(game: TeamCardGame) {
   );
 }
 
+// A conference title game, or Army-Navy: on ESPN's schedule, outside Pick 6
+const AFTER_SEASON_NOTE = "After the Pick 6 season, doesn't count";
+
 function rosterNote(game: TeamCardGame, owner: Owner, myId: number | undefined): string | null {
-  if (game.counted || !owner) return null;
+  if (game.afterSeason || game.counted || !owner) return null;
   return owner.userId === myId ? 'Not on your roster' : `Not on ${firstName(owner.userName)}'s roster`;
 }
 
@@ -235,9 +239,11 @@ function GameRow({
         {game.teamScore !== null && game.opponentScore !== null && (
           <span className="tabular-nums">{game.teamScore}-{game.opponentScore}</span>
         )}
-        <span className="text-gray-400">
-          {game.teamSpread !== null ? `line ${formatSpread(game.teamSpread)}` : 'no line'}
-        </span>
+        {!game.afterSeason && (
+          <span className="text-gray-400">
+            {game.teamSpread !== null ? `line ${formatSpread(game.teamSpread)}` : 'no line'}
+          </span>
+        )}
       </>
     );
   } else if (live) {
@@ -269,9 +275,10 @@ function GameRow({
   }
 
   // Right column: Pick 6 points, once the game is final. Lines stay in the
-  // meta line so a +1 here is never mistaken for a spread.
+  // meta line so a +1 here is never mistaken for a spread. A game after the
+  // season is never scored, so it has nothing to show here.
   let right: React.ReactNode = null;
-  if (final) {
+  if (final && !game.afterSeason) {
     right =
       game.points !== null ? (
         <span
@@ -303,6 +310,7 @@ function GameRow({
             {game.playedWeek !== game.week && (
               <span className="text-amber-700">played wk {game.playedWeek}</span>
             )}
+            {game.afterSeason && <span className="text-amber-700">{AFTER_SEASON_NOTE}</span>}
             {note && <span className="text-amber-700">{note}</span>}
           </p>
         </div>
@@ -531,7 +539,9 @@ function MatchupPanel({
   const lossPts = spread !== null && spread <= -3.5 ? -1 : 0;
 
   let pickSix: React.ReactNode = null;
-  if (final && game.points !== null) {
+  if (game.afterSeason) {
+    pickSix = <span className="text-gray-500">Doesn't count: the season ended with week {card.lastWeek}</span>;
+  } else if (final && game.points !== null) {
     const why =
       game.result === 'W'
         ? game.wasUpset ? 'won as an underdog of 3.5+' : 'win'
@@ -584,8 +594,9 @@ function MatchupPanel({
             dim={final && game.result === 'W'}
           />
         </div>
-        {(game.playedWeek !== game.week || note) && (
+        {(game.playedWeek !== game.week || note || game.afterSeason) && (
           <p className="text-xs text-amber-700 text-center mt-2">
+            {game.afterSeason && `${AFTER_SEASON_NOTE}.`}
             {game.playedWeek !== game.week &&
               `Played in week ${game.playedWeek}; counts as week ${game.week} because the team was off then. `}
             {note && `${note} in week ${game.week}, so it didn't count there.`}
@@ -616,7 +627,7 @@ function MatchupPanel({
       )}
 
       <dl className="divide-y divide-gray-100 border-y border-gray-100">
-        <DetailRow label="Line">{lineText}</DetailRow>
+        {!game.afterSeason && <DetailRow label="Line">{lineText}</DetailRow>}
         {pickSix ? (
           <DetailRow label="Pick 6">{pickSix}</DetailRow>
         ) : (

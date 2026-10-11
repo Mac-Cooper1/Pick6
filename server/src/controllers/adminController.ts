@@ -18,6 +18,7 @@ import {
   syncSeasonCalendar,
   getCurrentSeasonYear,
   getCurrentWeek,
+  isSeasonOver,
 } from '../services/seasonService';
 import { wasUpset } from '../services/teamMatcher';
 import { getGamesForWeek, fetchGameLine } from '../services/espnClient';
@@ -37,6 +38,15 @@ export async function syncCurrentEndpoint(req: AuthRequest, res: Response) {
     : getCurrentSeasonYear();
 
   const weekNumber = await getCurrentWeek(seasonYear);
+
+  // The cron keeps firing all winter: once the season has closed there is
+  // nothing left to score, and nothing should move (no ESPN calls, no Odds
+  // API credit). A commissioner's Sync Now still works for a late correction.
+  if (await isSeasonOver(seasonYear)) {
+    console.log(`[Admin] sync-current: season ${seasonYear} is over, nothing to sync`);
+    res.json({ success: true, seasonYear, weekNumber, seasonOver: true });
+    return;
+  }
 
   console.log(`[Admin] sync-current: season ${seasonYear}, week ${weekNumber}`);
 

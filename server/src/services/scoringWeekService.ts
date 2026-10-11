@@ -20,6 +20,7 @@
 
 import prisma from '../lib/prisma';
 import { GameStatus, Prisma } from '@prisma/client';
+import { getSeasonWeeks } from './seasonService';
 
 export type ScoredGame = Prisma.GameGetPayload<{
   include: { homeTeam: true; awayTeam: true };
@@ -86,13 +87,10 @@ export function assignScoringWeeks<
   return result;
 }
 
-/** Final week of the season calendar (15 for 2026); falls back to 15. */
+/** Final week of the Pick 6 season (13 for 2026); falls back to 13. */
 export async function getLastWeek(seasonYear: number): Promise<number> {
-  const agg = await prisma.seasonWeek.aggregate({
-    where: { seasonYear },
-    _max: { weekNumber: true },
-  });
-  return agg._max.weekNumber ?? 15;
+  const weeks = await getSeasonWeeks(seasonYear);
+  return weeks[weeks.length - 1]?.weekNumber ?? 13;
 }
 
 /**
