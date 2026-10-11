@@ -115,6 +115,38 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
   `lastPlay.text` would be a one-line "last play" (Mac said no play log).
   The My Team tiles could show the same live score with no extra ESPN
   calls (same cached week scoreboard).
+- **Video messages, what's left (Oct 10: script drafts, the logo,
+  $3.50 Stripe checkout, and any member can make one).**
+  - **Take a video down.** Since Oct 10 any member can email the league a
+    video, and nobody can remove one: not its maker, not the commissioner.
+    A "Remove" for the maker and the commissioner (hide it from the banner
+    and the email link) is the first thing to build if a video ever lands
+    badly. Until then: Mac can clear `sentAt` by hand.
+  - **Email volume.** One send is an email to every other member, from the
+    same Resend account as password resets (free: 100 a day). About ten
+    sends in a day in 10-person leagues would use it up. Each of those is
+    a $3.50 sale, so the answer is Resend's paid plan, but watch for it.
+  - **Script and photo checks before strangers use it at scale.** Today
+    the guards are: member of a drafted league, a card on file, the
+    own-face checkbox, and the providers' filters. A check on the script
+    (the Claude call is already there) and on the photo is the next step
+    if this ever gets real traffic.
+  - **Refunds are manual** (Stripe dashboard → Payments → Refund). A failed
+    video returns a credit instead. A webhook isn't needed: the app asks
+    Stripe directly. Sales tax (Stripe Tax) is not set up.
+  - **Margin at $3.50**: Stripe keeps $0.40, a 38-second video cost
+    $2.21, so about $0.89 is left. Script drafts run on Haiku 5.5 (about
+    a tenth of a cent each); if the jokes feel flat,
+    `VIDEO_SCRIPT_MODEL=claude-sonnet-5-5` (~1.5 cents) or
+    `claude-opus-5-5` (~3 cents) is one env var. `VIDEO_PRICE_CENTS` is the
+    other knob; a shorter script cap is a third.
+  - Voice samples (play each voice before choosing), your own voice
+    (ElevenLabs instant clone, with its own consent step), delete a video,
+    and a member reply ("react") if they turn out to be a hit.
+  - Jobs survive a deploy: store fal's request ids and resume polling
+    instead of marking in-flight videos failed at startup.
+  - The logo stamp runs ffmpeg in the web process (one thread, low
+    priority, ~160 MB). If videos get frequent, move it to a worker.
 - **Change password while signed in.** Today `/login` bounces signed-in
   users to the dashboard, so they'd sign out and use Forgot password. A
   Settings card (current + new password) is small.

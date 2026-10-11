@@ -7,9 +7,11 @@ import { ErrorMessage } from './ErrorMessage';
 import { Loading } from './Loading';
 import { Button } from './Button';
 import { Input } from './Input';
+import { VideoComposer } from './VideoMessages';
 
 interface SettingsTabProps {
   leagueId: number;
+  scrollToVideo?: number; // changes when "Make your own" under a league video is tapped
 }
 
 // Local-timezone YYYY-MM-DD. Never toISOString() for date inputs: the UTC
@@ -20,7 +22,7 @@ function toLocalDateString(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function SettingsTab({ leagueId }: SettingsTabProps) {
+export function SettingsTab({ leagueId, scrollToVideo = 0 }: SettingsTabProps) {
   const { user, updateUser, logout } = useAuth();
   const queryClient = useQueryClient();
 
@@ -377,6 +379,9 @@ export function SettingsTab({ leagueId }: SettingsTabProps) {
           </Button>
         </div>
       )}
+
+      {/* Every member: AI video message (renders nothing if the server says they can't make one) */}
+      <VideoComposer leagueId={leagueId} scrollTo={scrollToVideo} />
 
       {/* Commissioner Settings */}
       {isCommissioner ? (

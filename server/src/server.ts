@@ -10,6 +10,7 @@ import { validateEnv } from './lib/env';
 import { testDatabaseConnection, disconnectPrisma } from './lib/prisma';
 import { initDraftSocket, setIOInstance } from './socket/draftSocket';
 import { errorMessage } from './utils/errors';
+import { failInterruptedVideos } from './services/videoService';
 
 // Load environment variables FIRST
 dotenv.config();
@@ -50,6 +51,9 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
+// The video maker's photo rides in the JSON body (~200 KB once the app has
+// shrunk it); every other route keeps the 100 KB default
+app.use('/api/leagues/:leagueId/videos', express.json({ limit: '4mb' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -99,6 +103,9 @@ async function startServer() {
   try {
     // Test database connection before starting server
     await testDatabaseConnection();
+
+    // Video jobs run in-process: any left mid-way by the last process are lost
+    await failInterruptedVideos().catch((e) => console.error(`[Video] Startup sweep: ${errorMessage(e)}`));
 
     httpServer.listen(PORT, () => {
       console.log(`🏈 Pick 6 server running on port ${PORT}`);
