@@ -329,30 +329,10 @@ export async function getRosterMatchups(
     throw new Error('League not found');
   }
 
-  let seasonYear = league.seasonYear;
-
-  // Check if we need to use current season instead of configured season
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth(); // 0 = January, 11 = December
-
-  // CFB season naming: "2025 season" runs from Aug 2025 to Jan 2026
-  // In December, we're in the current year's season bowls
-  // In January, we're in the previous year's season bowls
-  const actualSeasonYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-
-  // If configured season is outdated, use the actual current season
-  if (seasonYear < actualSeasonYear) {
-    console.log(`[Matchup] Season ${seasonYear} is outdated, using ${actualSeasonYear} instead`);
-    seasonYear = actualSeasonYear;
-  }
-
-  // Determine if we're in bowl season (late December or January)
-  const isLateDecember = currentMonth === 11 && now.getDate() > 10;
-  const isJanuary = currentMonth === 0;
-  const isBowlSeason = isLateDecember || isJanuary;
-
-  // Week comes from the ESPN-derived calendar (D6), not a stored counter
+  // Always the league's own season and the ESPN-derived calendar week (D6).
+  // After the final week getCurrentWeek stays on it, so these tabs freeze on
+  // the last slate: never title games, bowls or next season's schedule.
+  const seasonYear = league.seasonYear;
   const week = weekNumber || (await getCurrentWeek(seasonYear));
 
   // Get user's current roster
@@ -368,30 +348,13 @@ export async function getRosterMatchups(
   });
 
   // Get ESPN games for the week (cached)
-  // In bowl season, try postseason first, otherwise try regular season
-  const gamesCacheKey = `matchups:games:${seasonYear}:${isBowlSeason ? 'bowls' : week}`;
+  const gamesCacheKey = `matchups:games:${seasonYear}:${week}`;
   let games = cacheService.get<ParsedGame[]>(gamesCacheKey);
 
   if (!games) {
     try {
-      if (isBowlSeason) {
-        // In bowl season, fetch postseason games first
-        console.log(`[Matchup] Bowl season detected, fetching postseason games for ${seasonYear}...`);
-        const postResponse = await fetchScoreboard(seasonYear, 1, 3); // type 3 = postseason
-        games = parseScoreboardGames(postResponse, seasonYear, 1);
-        console.log(`[Matchup] Found ${games.length} postseason games`);
-
-        // If no postseason games, fall back to late regular season
-        if (games.length === 0) {
-          console.log('[Matchup] No postseason games, trying late regular season...');
-          const response = await fetchScoreboard(seasonYear, 15, 2);
-          games = parseScoreboardGames(response, seasonYear, 15);
-        }
-      } else {
-        // Regular season - fetch by week
-        const response = await fetchScoreboard(seasonYear, week, 2);
-        games = parseScoreboardGames(response, seasonYear, week);
-      }
+      const response = await fetchScoreboard(seasonYear, week, 2);
+      games = parseScoreboardGames(response, seasonYear, week);
 
       cacheService.set(gamesCacheKey, games, CACHE_TTL.ESPN_SCHEDULE);
     } catch (error) {

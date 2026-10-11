@@ -11,7 +11,9 @@ Big 12, Group of 6 (AAC/CUSA/MAC/MWC/Sun Belt/rebuilt Pac-12) — in a **live
 snake draft** (Socket.IO, pick clock, autopick). Scoring per team per week
 from real games and betting lines: **+1 win · +2 win as underdog of +3.5 or
 more · 0 loss · −1 loss as favorite of −3.5 or more** — mutually exclusive,
-no line = plain result. One cumulative leaderboard. **Week 6 swap**: during
+no line = plain result. One cumulative leaderboard over **ESPN weeks 1–13**
+(the season ends with rivalry weekend; title games and Army-Navy are after
+it and don't count). **Week 6 swap**: during
 week 5 everyone ranks a private list of same-slot swaps; when week 6 starts
 the scheduled sync runs every league once, worst record first (Sep 30
 redesign of the old turn-based week-5 window).
@@ -28,9 +30,21 @@ turn — standing instruction from Mac)**.
   draft order is assigned at *scheduling* time — random or
   commissioner-manual via `assignDraftOrder` — and `startDraft` respects it,
   shuffling only members without positions),
-  `syncService` (ESPN games → odds → finalize upsets → rescore; idempotent),
+  `syncService` (ESPN games → odds → finalize upsets → rescore; idempotent;
+  `saveWeekGames` is the one place a `Game` row is written from ESPN, and
+  since Oct 10 it never stores a game after the season's final week or a
+  game with a "TBD" team, and a stored row follows ESPN if its teams change,
+  dropping its line),
   `seasonService` (D6: ESPN week calendar, **current week is derived from the
-  clock, never stored**), `scoringWeekService` (Sep 11: **every game a team
+  clock, never stored**; Oct 10: `getSeasonWeeks` = ESPN's calendar minus
+  its last two weeks, i.e. **the Pick 6 season, weeks 1–13 in 2026**, and it
+  is the only thing that may answer "which week is it" or "which weeks
+  exist": read it, never `SeasonWeek` directly (the swap's weeks 5/6 by
+  number are the one exception), so the current week stops at 13 and
+  nothing later is synced, scored or shown as a week; `isSeasonOver` = 48h
+  after the final week ends, when `sync-current` becomes a no-op and
+  `syncSosRanks` stops, so the final leaderboard and its tiebreaker stay
+  put), `scoringWeekService` (Sep 11: **every game a team
   plays counts**; a second game inside one ESPN week rolls into the next
   week if the team is off then, otherwise both count that week; the one
   `pointsForTeam` formula; scoring, Week by Week and My Team all read it), `swapService` (week-6 swap: lists open/lock from
@@ -46,7 +60,9 @@ turn — standing instruction from Mac)**.
   ±3.5 threshold), `espnClient`, `oddsClient`, `matchupService` (League tab
   matchups — reads spreads from `Game` rows by `espnEventId`, **never** the
   live Odds API: 500 free credits/month, only the sync pipeline may spend
-  them), `teamCardService` (Sep 30: the team card behind
+  them; the games themselves come from ESPN's scoreboard for the league's
+  own season and the calendar week, and nothing in it reads the clock: a
+  pre-rebuild "bowl season after Dec 10" branch was removed Oct 10), `teamCardService` (Sep 30: the team card behind
   `GET /rosters/:id/teams/:teamId`; merges ESPN's team schedule with the
   team's `Game` rows by `espnEventId`: scoring truth, i.e. stored line,
   upset flag, `pointsForTeam`, scoring week, and once a row is FINAL its
@@ -206,13 +222,16 @@ cd client && npm run dev          # client :3000 (Vite proxy → same-origin)
 ```
 
 **The regression harness** (run after any server-side change):
-`cd server && npx tsx scripts/smoke-test.ts` — 180 assertions covering the
+`cd server && npx tsx scripts/smoke-test.ts` — 196 assertions covering the
 whole draft, DB constraints, every scoring case incl. the exact ±3.5
 boundary, the week-6 swap (list validation, privacy, run order,
 fallthrough, dropped-team rule, kickoff safety net, idempotent re-run; the
 swap functions take a `now` so it stays date-independent), the SOS
 tiebreaker (both directions, unranked fallback) and the swap board, double-game
-week attribution, the odds matcher and the team card (ESPN/Game-row merge,
+week attribution, the end of the season (week 13 is final and the current
+week stops there, nothing later or with a TBD team is stored, a row follows
+a team change, the 48-hour close), the odds matcher
+and the team card (ESPN/Game-row merge,
 which game it opens on, the schedule cache timing, the Game-row-only fallback: ESPN has no 2099 season,
 so the card's end-to-end checks run exactly like an ESPN outage; plus the
 live view from a real game's numbers, both perspectives), and the
@@ -297,6 +316,22 @@ reach the page; a DOM `.click()` still works). Set the token instead.
   that ends after ESPN's week boundary), current (full pipeline), next
   (schedule only, so the attribution can tell a bye from an unsynced week).
   Still one Odds API credit per run.
+- **ESPN's calendar is two weeks longer than the season** (checked against
+  ESPN Oct 10). Week 13 (Nov 23–29) is the last full slate and the last
+  Pick 6 week. ESPN's week 14 is only the 10 conference title games and
+  week 15 is one game, Army-Navy; both are still seasontype 2, so "regular
+  season" alone doesn't exclude them: `getSeasonWeeks` does, by dropping the
+  calendar's last two weeks (`ESPN_WEEKS_AFTER_PICK6`; the same shape held
+  in 2024 and 2025, where the two weeks were 15 and 16). **Check it each
+  August** against the new calendar. Army and Navy are therefore 11-game
+  teams. All 15 `SeasonWeek` rows stay in the table.
+- **ESPN lists a game before its teams are known** with stand-in teams (ids
+  `-1`/`-2`, named "TBD"): the **Pac-12's four week-13 flex games**, whose
+  away teams (Boise State, Oregon State, San Diego State, Texas State) are
+  named about Nov 21, and every title game. Until Oct 10 the sync stored
+  those rows and never updated the teams, so the real away team would never
+  have scored. `saveWeekGames` now waits for both teams
+  (`isPlaceholderTeamId`).
 - **Odds only attach to games that haven't kicked off** — after kickoff the
   spread is unrecoverable. The daily 11:00 UTC cron exists for this. Missing
   lines on FBS-vs-FCS blowouts are books-not-posting, not a bug; they
@@ -358,8 +393,10 @@ reach the page; a DOM `.click()` still works). Set the token instead.
 Week 1 games: **Aug 27–Sep 7** (dress-rehearsal target: the Aug 27–29
 slate). League drafts before Sep 5. Week 5 (**Sep 28**) → swap lists open.
 Week 6 starts **Mon Oct 5, 3am ET** → lists lock, and the 08:30 UTC sync
-runs every league's swap (first week-6 kickoff: Tue Oct 6). Season ends
-Dec 12 (Army-Navy, week 15). No bowls, no CFP.
+runs every league's swap (first week-6 kickoff: Tue Oct 6). **The season
+ends with week 13**: last games Sat **Nov 28**, and it closes itself Wed
+Dec 2, 3am ET (no more syncs, tiebreaker frozen). No conference title games
+(Dec 4–5), no Army-Navy (Dec 12), no bowls, no CFP.
 
 ## Status (as of Sep 11, 2026)
 
@@ -484,3 +521,12 @@ test1/2/3 now log in as `mac.cooper002+test1/2/3@gmail.com` (their
 made-up Gmail addresses were strangers' inboxes; Mac OK'd the one-off
 UPDATE). Any new test account in prod: a `+` address of Mac's Gmail or
 `@test.local`, never an invented address on a real provider.
+**Also Oct 10 (after PR #36)**: the end of the season, audited against ESPN's live schedule
+(README changelog has the numbers). Mac's call, after first leaning toward
+"weeks 1–15 minus title games": **the season is weeks 1–13**, because two
+more weeks for one game (Army-Navy) wasn't worth it. Also fixed: the "TBD"
+team bug and the Dec 11 bowl-season branch in `matchupService`; the season
+now closes itself. Parked in NOTES.md: a real end-of-season state (a Final
+banner, the champion). Real-league stakes: Mac owns Army in leagues 5 and 8
+and T owns Navy in 8 (11-game teams now; T hadn't been told as of Oct 10),
+Boise State is owned in 5 and 8.

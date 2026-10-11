@@ -18,10 +18,17 @@ import {
   makePick,
   DRAFT_SLOTS,
 } from '../src/services/draftService';
-import { finalizeGames, calculateLeagueScores } from '../src/services/syncService';
-import { assignScoringWeeks, loadScoringWeekMap } from '../src/services/scoringWeekService';
+import { finalizeGames, calculateLeagueScores, saveWeekGames } from '../src/services/syncService';
+import { assignScoringWeeks, getLastWeek, loadScoringWeekMap } from '../src/services/scoringWeekService';
+import { getCurrentWeek, getSeasonWeeks, isSeasonOver } from '../src/services/seasonService';
 import { matchGameToOdds, teamNamesAgree } from '../src/services/teamMatcher';
-import { EspnScheduleGame, ParsedGame, parseLiveGames, parseScoreboardGames } from '../src/services/espnClient';
+import {
+  EspnScheduleGame,
+  isPlaceholderTeamId,
+  ParsedGame,
+  parseLiveGames,
+  parseScoreboardGames,
+} from '../src/services/espnClient';
 import { applyLiveGames, getTeamCard, mergeTeamGames, pickPreviewGame, scheduleTtl } from '../src/services/teamCardService';
 import { ParsedOdds } from '../src/services/oddsClient';
 import { getUserRoster, getAllRosters } from '../src/services/rosterService';
@@ -907,6 +914,148 @@ async function main() {
     'scoreboard: ESPN neutralSite is read (Red River), and a missing flag means a campus game'
   );
 
+  // ---------- The end of the season: week 13, teams TBD, the close ----------
+  console.log('— End of season');
+  // ESPN's calendar runs two weeks past the Pick 6 season (title games, then
+  // Army-Navy). `calendar` is ESPN's; the season is everything but its last two.
+  const finalWeek = calendar[calendar.length - 3];
+  const during = (week: (typeof calendar)[number]) => new Date(week.startDate.getTime() + 36 * 60 * 60 * 1000);
+  assert(
+    (await getLastWeek(SMOKE_SEASON)) === finalWeek.weekNumber && finalWeek.weekNumber === calendar.length - 2,
+    `season: the final week is ESPN's last full slate (week ${finalWeek.weekNumber} of ${calendar.length})`
+  );
+  assert(
+    (await getCurrentWeek(SMOKE_SEASON, during(calendar[calendar.length - 4]))) === finalWeek.weekNumber - 1 &&
+      (await getCurrentWeek(SMOKE_SEASON, during(finalWeek))) === finalWeek.weekNumber,
+    'season: the current week follows the calendar up to the final week'
+  );
+  assert(
+    (await getCurrentWeek(SMOKE_SEASON, during(calendar[calendar.length - 2]))) === finalWeek.weekNumber &&
+      (await getCurrentWeek(SMOKE_SEASON, during(calendar[calendar.length - 1]))) === finalWeek.weekNumber,
+    'season: title-game week and Army-Navy week are still the final week (nothing advances)'
+  );
+  assert(
+    (await getSeasonWeeks(SMOKE_SEASON)).length === calendar.length - 2,
+    'season: Week by Week gets the season\'s weeks, not ESPN\'s last two'
+  );
+
+  // The season closes 48 hours after the final week ends
+  const hours = (n: number) => new Date(finalWeek.endDate.getTime() + n * 60 * 60 * 1000);
+  assert(
+    !(await isSeasonOver(SMOKE_SEASON, hours(-8))) && !(await isSeasonOver(SMOKE_SEASON, hours(47))),
+    'season close: still open through the last game and the two days after the final week'
+  );
+  assert(await isSeasonOver(SMOKE_SEASON, hours(49)), 'season close: over 48 hours after the final week ends');
+  assert(!(await isSeasonOver(1999)), 'season close: a season with no calendar is not "over"');
+
+  // ESPN's stand-in for a team it can't name yet (a Pac-12 flex game)
+  const [flexTbd] = parseScoreboardGames(
+    {
+      events: [{
+        ...sbEvent('flex', false),
+        competitions: [{
+          ...sbEvent('flex', false).competitions[0],
+          competitors: [
+            { id: '36', homeAway: 'home' as const, team: sbTeam('36', 'Colorado State', 'CSU') },
+            { id: '-2', homeAway: 'away' as const, team: sbTeam('-2', 'TBD', 'TBD') },
+          ],
+        }],
+      }],
+    },
+    2026,
+    13
+  );
+  assert(
+    isPlaceholderTeamId(flexTbd.awayTeam.espnId) && !isPlaceholderTeamId(flexTbd.homeTeam.espnId) && isPlaceholderTeamId(''),
+    'scoreboard: ESPN\'s "TBD" stand-in team (id -2) is recognised, a real id is not'
+  );
+
+  // The sync: three real teams nobody in the smoke league owns
+  const smokeOwned = (await prisma.rosterSlot.findMany({ where: { leagueId: league.id } })).map((r) => r.teamId);
+  const [flexHome, flexAway, flexOther] = await prisma.team.findMany({
+    where: { slot: ConferenceSlot.G6, espnTeamId: { not: null }, id: { notIn: smokeOwned } },
+    orderBy: { id: 'asc' },
+    take: 3,
+  });
+  const lateGame = (
+    espnEventId: string,
+    away: { espnTeamId: string | null; name: string },
+    extra: Partial<ParsedGame> = {}
+  ): ParsedGame => ({
+    espnEventId,
+    seasonYear: SMOKE_SEASON,
+    weekNumber: finalWeek.weekNumber,
+    homeTeam: { espnId: flexHome.espnTeamId!, name: flexHome.name, abbreviation: '', displayName: flexHome.name },
+    awayTeam: { espnId: away.espnTeamId ?? '', name: away.name, abbreviation: '', displayName: away.name },
+    startTime: new Date('2026-11-28T20:00:00Z'),
+    status: 'scheduled',
+    homeScore: null,
+    awayScore: null,
+    venue: null,
+    neutralSite: false,
+    broadcast: null,
+    isCompleted: false,
+    winnerId: null,
+    ...extra,
+  });
+  const gameRow = (espnEventId: string) => prisma.game.findUnique({ where: { espnEventId } });
+
+  // Title-game week and Army-Navy week: real teams, real finals, no rows
+  const afterSeason = [
+    await saveWeekGames(SMOKE_SEASON, finalWeek.weekNumber + 1, [
+      lateGame('smoke-title', flexAway, { status: 'final', homeScore: 31, awayScore: 3, winnerId: flexHome.espnTeamId }),
+    ]),
+    await saveWeekGames(SMOKE_SEASON, finalWeek.weekNumber + 2, [lateGame('smoke-army-navy', flexAway)]),
+  ];
+  assert(
+    afterSeason.every((r) => r.games.length === 0) &&
+      (await gameRow('smoke-title')) === null &&
+      (await gameRow('smoke-army-navy')) === null,
+    'sync: a game after the final week is never stored, so it can never score'
+  );
+
+  const early = await saveWeekGames(SMOKE_SEASON, finalWeek.weekNumber, [
+    lateGame('smoke-flex', { espnTeamId: '-2', name: 'TBD' }),
+  ]);
+  assert(
+    early.games.length === 0 &&
+      (await gameRow('smoke-flex')) === null &&
+      (await prisma.team.findFirst({ where: { name: 'TBD' } })) === null,
+    'sync: a game with a TBD team gets no Game row yet (and no "TBD" team)'
+  );
+
+  await saveWeekGames(SMOKE_SEASON, finalWeek.weekNumber, [lateGame('smoke-flex', flexAway)]);
+  await prisma.game.update({
+    where: { espnEventId: 'smoke-flex' },
+    data: { spread: -6.5, favoriteTeamId: flexHome.id, bookmaker: 'DraftKings' },
+  });
+  await saveWeekGames(SMOKE_SEASON, finalWeek.weekNumber, [lateGame('smoke-flex', flexAway)]);
+  const flexSet = await gameRow('smoke-flex');
+  assert(
+    flexSet?.homeTeamId === flexHome.id && flexSet.awayTeamId === flexAway.id && flexSet.spread === -6.5,
+    'sync: once ESPN names both teams the game is stored, and a re-sync keeps its line'
+  );
+
+  // ESPN swaps the away team under the same event id (the flex pairing moves)
+  await saveWeekGames(SMOKE_SEASON, finalWeek.weekNumber, [
+    lateGame('smoke-flex', flexOther, { status: 'final', homeScore: 17, awayScore: 24, winnerId: flexOther.espnTeamId }),
+  ]);
+  const flexMoved = await gameRow('smoke-flex');
+  assert(
+    flexMoved?.awayTeamId === flexOther.id && flexMoved.winnerTeamId === flexOther.id,
+    'sync: a stored game follows ESPN when its teams change'
+  );
+  assert(
+    flexMoved?.spread === null && flexMoved.favoriteTeamId === null && flexMoved.bookmaker === null,
+    'sync: the old matchup\'s line does not carry over to the new one'
+  );
+  const flexWeeks = await loadScoringWeekMap(SMOKE_SEASON, [flexAway.id, flexOther.id]);
+  assert(
+    (flexWeeks.get(flexOther.id)?.get(finalWeek.weekNumber)?.length ?? 0) === 1 &&
+      (flexWeeks.get(flexAway.id)?.size ?? 0) === 0,
+    'sync: the game now scores for the team that played it, not the one ESPN first listed'
+  );
+
   // ---------- Odds matcher (the Hawai'i vs UNLV cross-match) ----------
   console.log('— Odds matcher');
   const espnGame = (home: string, away: string, startTime: string): ParsedGame => ({
@@ -925,7 +1074,7 @@ async function main() {
     isCompleted: false,
     winnerId: null,
   });
-  const oddsEvent = (homeTeam: string, awayTeam: string, spread: number, commence: string): ParsedOdds => ({
+  const oddsEvent =(homeTeam: string, awayTeam: string, spread: number, commence: string): ParsedOdds => ({
     oddsEventId: 'o',
     homeTeam,
     awayTeam,
@@ -1036,6 +1185,27 @@ async function main() {
   assert(
     pickPreviewGame([...merged, { ...cgFuture, espnEventId: 'live', status: 'in_progress' }])?.espnEventId === 'live',
     'no tap → a live game beats the next one'
+  );
+  // After the season: ESPN still lists a title game and Army-Navy (weeks 14, 15)
+  const withLate = mergeTeamGames(
+    aliceSec.teamId,
+    await loadScoringWeekMap(SMOKE_SEASON, [aliceSec.teamId]),
+    [
+      espnSched('smoke-g8', 2, '2026-09-12T20:00:00Z', { status: 'final', teamWon: true, teamScore: 14, opponentScore: 7 }),
+      espnSched('401888888', 14, '2026-12-05T21:00:00Z'),
+      espnSched('401888889', 15, '2026-12-12T20:00:00Z'),
+    ],
+    null,
+    13
+  );
+  const late = withLate.filter((g) => g.afterSeason);
+  assert(
+    late.map((g) => g.espnEventId).join() === '401888888,401888889' && late.every((g) => g.points === null) && !cgFuture.afterSeason,
+    'card: games after the final week are shown and flagged as outside the season'
+  );
+  assert(
+    pickPreviewGame(withLate)?.afterSeason === false && pickPreviewGame(withLate, '401888889') === late[1],
+    'card: it never opens on a game after the season unless that game was tapped'
   );
 
   // How long a team's ESPN schedule stays cached (Sat noon UTC)

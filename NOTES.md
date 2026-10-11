@@ -77,6 +77,16 @@ Running list of deliberate deferrals. QA bugs go straight into work, not here.
 
 ## Parking lot
 
+- **A proper end-of-season state (Oct 10).** The season ends with week 13
+  and the app just stays there: My Team and League keep showing week 13's
+  finals, the leaderboard stops moving. Nothing says "Final" or names the
+  winner. A banner on the Leaderboard once `isSeasonOver` is true (champion,
+  final order, maybe the season's best week) would finish it. Same change
+  retires `LeagueTab.tsx`'s "Season Over" label, which is a browser date
+  check (Dec 11) left over from before the rebuild.
+- **Army and Navy are 11-game teams (Oct 10).** Their 12th game is two weeks
+  after the season ends. Fine once it's known before a draft; worth a line
+  on the draft board in 2027 so nobody takes one without knowing.
 - **Swap emails (built Oct 2, pulled Oct 4 before shipping: Mac wants one
   thing at a time, reset first).** The design worked end to end in the
   smoke test, so rebuilding is mostly re-typing:

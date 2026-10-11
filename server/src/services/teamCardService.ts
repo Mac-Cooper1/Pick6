@@ -74,6 +74,7 @@ export interface TeamCardGame {
   wasUpset: boolean;
   points: number | null; // null until the Game row is FINAL
   counted: boolean; // false = outside the owner's roster window (the swap)
+  afterSeason: boolean; // played after the Pick 6 season ended: shown, never scored
   venue: string | null;
   broadcast: string | null;
   espnUrl: string | null;
@@ -147,7 +148,8 @@ export function mergeTeamGames(
   teamId: number,
   scoringWeeks: ScoringWeekMap,
   espnGames: EspnScheduleGame[],
-  window: OwnerWindow | null
+  window: OwnerWindow | null,
+  lastWeek: number = Infinity
 ): TeamCardGame[] {
   const rows = new Map<string, { game: ScoredGame; week: number }>();
   for (const [week, games] of scoringWeeks.get(teamId) ?? []) {
@@ -191,6 +193,7 @@ export function mergeTeamGames(
       result: won === null ? null : won ? 'W' : 'L',
       ...scoringFields(row?.game, teamId),
       counted: counted(week),
+      afterSeason: week > lastWeek,
       venue: espn.venue ?? row?.game.venue ?? null,
       broadcast: espn.broadcast,
       espnUrl: espnGameUrl(espn.espnEventId),
@@ -232,6 +235,7 @@ export function mergeTeamGames(
           : null,
       ...scoringFields(game, teamId),
       counted: counted(week),
+      afterSeason: week > lastWeek,
       venue: game.venue,
       broadcast: null,
       espnUrl: espnGameUrl(eventId),
@@ -277,14 +281,17 @@ export function applyLiveGames(
 
 /**
  * The game the card opens on: the tapped one, else the team's live game,
- * else its next game, else its last one
+ * else its next game, else its last one. Games after the Pick 6 season (a
+ * title game, Army-Navy) are only ever opened by a tap.
  */
 export function pickPreviewGame(games: TeamCardGame[], eventId?: string): TeamCardGame | null {
   const tapped = eventId ? games.find((g) => g.espnEventId === eventId) : undefined;
+  const season = games.filter((g) => !g.afterSeason);
   return (
     tapped ??
-    games.find((g) => g.status === 'in_progress') ??
-    games.find((g) => g.status === 'scheduled' || g.status === 'postponed') ??
+    season.find((g) => g.status === 'in_progress') ??
+    season.find((g) => g.status === 'scheduled' || g.status === 'postponed') ??
+    season[season.length - 1] ??
     games[games.length - 1] ??
     null
   );
@@ -419,7 +426,7 @@ export async function getTeamCard(
       (a, b) => Number(a.toWeek !== null) - Number(b.toWeek !== null) || b.fromWeek - a.fromWeek
     )[0] ?? null;
 
-  let games = mergeTeamGames(teamId, scoringWeeks, schedule?.games ?? [], ownerRow);
+  let games = mergeTeamGames(teamId, scoringWeeks, schedule?.games ?? [], ownerRow, lastWeek);
 
   // A live game gets ESPN's week scoreboard on top. One cached copy per week
   // serves every game in it, so ESPN sees one call a minute at most, however

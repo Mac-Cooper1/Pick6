@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import prisma from '../lib/prisma';
-import { getCurrentWeek } from '../services/seasonService';
+import { getCurrentWeek, getSeasonWeeks } from '../services/seasonService';
 import { SLOT_LABELS } from '../services/draftService';
 import { getStandings } from '../services/standingsService';
 import {
@@ -60,11 +60,7 @@ export async function getSeasonGrid(req: AuthRequest, res: Response) {
   }
 
   const [weeks, scores, standings, currentWeek] = await Promise.all([
-    prisma.seasonWeek.findMany({
-      where: { seasonYear: league.seasonYear },
-      orderBy: { weekNumber: 'asc' },
-      select: { weekNumber: true, label: true, startDate: true, endDate: true },
-    }),
+    getSeasonWeeks(league.seasonYear),
     prisma.weeklyScore.findMany({ where: { leagueId } }),
     getStandings(leagueId), // points, then the SOS tiebreaker
     getCurrentWeek(league.seasonYear),
@@ -85,7 +81,7 @@ export async function getSeasonGrid(req: AuthRequest, res: Response) {
   res.json({
     seasonYear: league.seasonYear,
     currentWeek,
-    weeks,
+    weeks: weeks.map(({ weekNumber, label, startDate, endDate }) => ({ weekNumber, label, startDate, endDate })),
     rows: rows.map((r, i) => ({ rank: i + 1, ...r })),
   });
 }

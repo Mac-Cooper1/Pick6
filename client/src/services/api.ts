@@ -576,6 +576,7 @@ export interface TeamCardGame {
   wasUpset: boolean;
   points: number | null; // null until scored
   counted: boolean; // false = outside the owner's roster window (the swap)
+  afterSeason: boolean; // played after the Pick 6 season ended: shown, never scored
   venue: string | null;
   broadcast: string | null;
   espnUrl: string | null;
